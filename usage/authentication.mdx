@@ -1,0 +1,260 @@
+---
+title: "Configuring Authentication in WSTG-Scan (Menu Option 1)"
+sidebarTitle: "Authentication"
+description: "Set up Basic Auth, HTML form login, headless Playwright for SPAs and OAuth2, or manual session mode so all scan modules run authenticated."
+---
+
+Authentication is configured through option 1 in the interactive menu. Once a session is established, every subsequent module — spidering, injection tests, API tests, bruteforce, and the rest — automatically uses the authenticated HTTP session. The authentication wizard runs every time you select option 1, so you can re-authenticate mid-session if a cookie expires or you want to switch accounts.
+
+The wizard begins by asking for an optional custom User-Agent, then asks whether you have a session token ready to paste (manual mode) or whether you want to enter credentials. Based on your answers and what it finds on the target, it tries authentication methods in a fixed priority order: Basic Auth → HTML form login → Headless Playwright login. If all three fail, the session remains unauthenticated.
+
+---
+
+## Custom User-Agent
+
+Before any authentication method, the wizard prompts for an optional User-Agent string. Leave it blank to use the default. The custom User-Agent is applied to all requests made during credential login, headless Playwright sessions, and manual mode.
+
+```text
+[?] User-Agent personalizado (vacio = por defecto):
+> Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
+```
+
+---
+
+## Mode 1: Basic Auth
+
+Basic Auth is attempted **only when the target server explicitly sends a `401 WWW-Authenticate: Basic` challenge**. The tool first probes the login URL without credentials; if the response is not a `401` with a `Basic` scheme, this mode is skipped entirely and form login is tried instead. This strict check prevents false positives on applications that happen to return 401 for other reasons.
+
+<Steps>
+  <Step title="Enter the login URL">
+    When prompted, provide the URL that requires authentication. Leave it blank to use the target URL.
+
+    ```text
+    [?] URL de login (dejar vacío si es la misma que la objetivo):
+    > https://internal.example.com/admin
+    ```
+  </Step>
+
+  <Step title="Enter username or email">
+    The tool auto-detects whether your identifier is an email address (by checking for `@`) and selects the correct form field accordingly.
+
+    ```text
+    [?] Usuario o email:
+    > admin
+    ```
+  </Step>
+
+  <Step title="Enter password">
+    The password prompt uses `getpass` so the value is not echoed to the terminal.
+
+    ```text
+    [?] Contraseña:
+    > (hidden input)
+    ```
+  </Step>
+
+  <Step title="Probe and authenticate">
+    The tool probes the login URL without credentials. If it receives `401 WWW-Authenticate: Basic`, it re-sends the request with the credentials via HTTP Basic Auth. A `200` response confirms success and the credentials are persisted on the session for all subsequent requests.
+
+    ```text
+    [+] Credenciales válidas (Basic Auth).
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  If the server returns a `401` but without a `Basic` challenge in `WWW-Authenticate`, or if it returns any other status code, the Basic Auth mode reports `not-used` and the wizard automatically proceeds to try HTML form login.
+</Note>
+
+---
+
+## Mode 2: HTML Form Login
+
+When Basic Auth is not in use, the tool fetches the login page and parses it for an HTML `<form>` containing both a password field and an identifier field (username or email). CSRF tokens and other hidden fields are automatically extracted and included in the POST request.
+
+<Steps>
+  <Step title="Provide login URL and credentials">
+    Same prompts as Basic Auth — login URL, username/email, and password. The tool parses the HTML of the login page using BeautifulSoup.
+  </Step>
+
+  <Step title="Form detection">
+    The tool scans all `<form>` elements on the page, looking for:
+    - A **password field** (`type="password"` or a name containing `pass`)
+    - An **email field** (`type="email"` or a name containing `email` / `correo`) or a **username field** (name containing `user`, `login`, `identifier`, `account`, `usuario`, `uname`)
+
+    If the identifier entered contains `@`, the email field is preferred; otherwise the username field is preferred.
+  </Step>
+
+  <Step title="CSRF token handling">
+    All hidden `<input type="hidden">` fields on the form are automatically included in the POST data. This handles CSRF tokens without any manual configuration.
+
+    ```text
+    # The tool automatically includes fields like:
+    # csrfmiddlewaretoken=abc123
+    # _token=xyz789
+    ```
+  </Step>
+
+  <Step title="Submit and verify">
+    The form is POST-submitted with all collected fields. The response is analysed to determine whether authentication succeeded:
+    - Presence of success markers (e.g. "dashboard", "welcome", "my account", "profile")
+    - Absence of the password form in the response
+    - Username appearing in the response body
+    - URL changed from the login path with no password field visible
+
+    If the response still shows a login form, credentials are rejected. A secondary check re-fetches the target URL to confirm the session persists.
+
+    ```text
+    [+] Credenciales válidas. Sesión autenticada verificada.
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  **Failure detection:** The tool also checks for Spanish and English failure phrases in the response body. If the response contains the password field again or recognisable failure text, the login is reported as invalid rather than silently accepting a bad session.
+</Note>
+
+---
+
+## Mode 3: Headless Playwright Login
+
+When no HTML form is found on the login page — which happens with Single Page Applications (Angular, Vue, React) where the login form is rendered by JavaScript — the wizard automatically attempts a headless Chromium login via Playwright. This mode also handles OAuth2/OIDC/PKCE flows where the user is redirected through an external identity provider.
+
+<Steps>
+  <Step title="Playwright availability check">
+    The tool checks whether Playwright is installed. If it is not:
+
+    ```text
+    [!] Playwright no instalado. Instalar para soportar SPAs/OAuth2:
+        pip install playwright && playwright install chromium
+    [?] Instalar Playwright ahora? [s/N]:
+    > s
+    [+] Playwright instalado correctamente.
+    ```
+
+    Accepting the prompt runs `pip install playwright` and `playwright install chromium` automatically.
+  </Step>
+
+  <Step title="Load the login page in headless Chromium">
+    Playwright launches a headless Chromium browser with `--no-sandbox` and navigates to the login URL, waiting for the network to become idle (`networkidle`). The custom User-Agent is applied to the browser context.
+  </Step>
+
+  <Step title="Fill identifier field">
+    The tool tries these selectors in order until one is found:
+    - `input[type='email']`
+    - `input[name*='email']`
+    - `input[name*='user']`
+    - `input[name*='login']`
+    - `input[name*='identifier']`
+
+    The identifier (username or email) is typed into the matched field.
+  </Step>
+
+  <Step title="Handle two-step forms">
+    Some OAuth2 flows (e.g. Google, Microsoft) show the email field first and reveal the password field only after clicking "Next" or "Continue". If the password field is not immediately visible, the tool clicks the first matching submit/next button and waits for the password field to appear:
+
+    ```text
+    # Tries in order:
+    # button[type='submit'], input[type='submit'],
+    # button:has-text('Next'), button:has-text('Siguiente'),
+    # button:has-text('Continue'), button:has-text('Continuar'),
+    # [data-testid='next-button']
+    ```
+  </Step>
+
+  <Step title="Fill password and submit">
+    The password is entered into `input[type='password']`. The form is then submitted by clicking a login button (trying selectors like `button:has-text('Login')`, `button:has-text('Sign in')`, `[data-testid='login-button']`, etc.) or by pressing `Enter` if no button is found.
+  </Step>
+
+  <Step title="Extract cookies and validate">
+    After the page settles (`networkidle`), all browser cookies are extracted and loaded into a `requests.Session`. The tool then checks that the final URL differs from the login URL (a redirect indicates successful authentication) and that the target page does not show a login form.
+
+    ```text
+    [+] Login headless exitoso (Playwright). URL final: https://app.example.com/dashboard
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  If Playwright is installed but the headless login fails (no cookies obtained, or the session still shows a login form), the wizard falls back to unauthenticated mode. In that case, use **Manual Session Mode** instead: log in through your browser, copy the complete cookie string, and paste it when prompted.
+</Note>
+
+---
+
+## Mode 4: Manual Session Mode
+
+Manual session mode lets you bypass the automated login entirely. You log in through your own browser, copy the session cookies and any required headers, and paste them into the tool. This is the most reliable option for complex SSO flows, multi-factor authentication, hardware tokens, or any login mechanism that automated tools cannot replicate.
+
+<Steps>
+  <Step title="Trigger manual mode">
+    At the very first prompt of the authentication wizard, answer `s` (yes) to use a manually obtained session:
+
+    ```text
+    [?] Usar cookie/token de sesion ya obtenido manualmente? [s/N]:
+    > s
+    ```
+  </Step>
+
+  <Step title="Paste the cookie string">
+    Copy the full cookie string from your browser (DevTools → Application → Cookies, or the `Cookie:` header in a captured request) and paste it at the prompt:
+
+    ```text
+    [?] Cookie completa (ej: PHPSESSID=...; csrftoken=...):
+    > PHPSESSID=abc123def456; csrftoken=xyz789; sessionid=qwerty
+    ```
+
+    The tool parses each `name=value` pair and sets them on the session's cookie jar as well as the `Cookie` header.
+  </Step>
+
+  <Step title="Add Authorization header (optional)">
+    If the application uses a Bearer token or other `Authorization` header, paste it here:
+
+    ```text
+    [?] Cabecera Authorization opcional (ej: Bearer ey...; vacio para omitir):
+    > Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+    ```
+  </Step>
+
+  <Step title="Add extra headers (optional)">
+    Add any additional headers required by the application (e.g. `X-CSRF-Token`, `X-API-Key`, tenant identifiers). Enter one `Name: value` pair per line and press Enter on a blank line to finish:
+
+    ```text
+    [?] Cabeceras extra opcionales Nombre: valor (linea vacia para terminar):
+    > X-CSRF-Token: abc123
+    > X-Tenant-ID: acme-corp
+    >
+    ```
+  </Step>
+
+  <Step title="Session validation">
+    The tool makes a GET request to the target URL with the provided session and checks whether the response looks authenticated (no login form visible, presence of authenticated content). If validation succeeds:
+
+    ```text
+    [+] Sesion manual validada. Las herramientas compatibles usaran cookies/cabeceras.
+    ```
+
+    If validation cannot confirm authentication, a warning is shown but the session is still loaded:
+
+    ```text
+    [!] Sesion manual cargada, pero no se pudo confirmar autenticacion (posible login page).
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  To capture the correct cookie string, open DevTools in your browser (F12), go to the **Network** tab, perform any authenticated action, click the request, and look at the **Request Headers** section for the `Cookie:` line. Copy everything after `Cookie:` and paste it at the prompt.
+</Tip>
+
+---
+
+## Authentication Status in the Menu
+
+Once authentication is configured, the menu header updates to show `[Autenticado]`:
+
+```text
+====================================================
+  WSTG SCANNER v1.4.2  [Autenticado]
+====================================================
+```
+
+All modules from that point forward use the authenticated session. If you need to re-authenticate (e.g. after a session timeout), simply select option 1 again.

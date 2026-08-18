@@ -1,0 +1,271 @@
+---
+title: "Scanning Multiple Targets with WSTG-Scan Efficiently"
+sidebarTitle: "Multiple Targets"
+description: "How to scan one or many targets using -u, -L, interactive multi-target mode, and fully automated batch mode with per-target reports."
+---
+
+WSTG-Scan supports four distinct target-loading patterns: a single URL entered interactively, multiple URLs supplied via the `--url` flag, a list file supplied via `--list`, or a combination of both flags. When more than one target is present, the tool automatically switches to multi-target mode — and adding `--batch` makes the entire run fully non-interactive, completing a full pentest per target without any manual intervention.
+
+---
+
+## No-Argument Startup (Interactive Prompt)
+
+When WSTG-Scan is started without any arguments, it presents a short selector asking what kind of target you want to work with:
+
+```text
+Selecciona el tipo de objetivo:
+  1. URL única
+  2. Lista de objetivos (varias URLs o un fichero)
+Opción [1]:
+```
+
+Choosing **1** prompts for a single URL and opens the standard interactive menu for that target.
+
+Choosing **2** lets you enter multiple URLs separated by commas or spaces, or type the path to a file on disk:
+
+```text
+Introduce URLs separadas por coma o espacio, o la ruta a un fichero (.txt):
+Objetivos: https://a.example.com, https://b.example.com
+```
+
+After loading the targets, the tool asks whether to run in batch mode:
+
+```text
+2 objetivos cargados. ¿Modo batch (pentest completo automático por objetivo)? [s/N]:
+```
+
+---
+
+## Single Target via `--url`
+
+The simplest invocation — specify a single URL with `-u` or `--url` and the tool goes straight to the interactive menu:
+
+```bash
+python3 wstg-scan.py -u https://app.example.com
+```
+
+You can also include `--output` to pre-set the report path so you are not prompted at the end:
+
+```bash
+python3 wstg-scan.py -u https://app.example.com -o ~/reports/app_report
+```
+
+---
+
+## Multiple Targets via `--url`
+
+The `--url` / `-u` flag is **repeatable**. Each use can itself be a comma-separated list of URLs. All values from all `-u` flags are combined before scanning begins.
+
+```bash
+# Two separate -u flags
+python3 wstg-scan.py -u https://a.example.com -u https://b.example.com
+
+# Comma-separated list in one -u value
+python3 wstg-scan.py -u "https://a.example.com,https://b.example.com,https://c.example.com"
+
+# Mixed: comma-list + extra flag
+python3 wstg-scan.py -u "https://a.example.com,https://b.example.com" -u https://c.example.com
+```
+
+---
+
+## Multiple Targets via `--list`
+
+The `--list` / `-L` flag reads targets from a plain-text file — one URL per line. Lines starting with `#` are treated as comments and skipped. Blank lines are ignored. The flag is also repeatable, so you can supply multiple files at once.
+
+```bash
+# Single list file
+python3 wstg-scan.py -L targets.txt
+
+# Two separate list files
+python3 wstg-scan.py -L internal_targets.txt -L external_targets.txt
+```
+
+Example list file format:
+
+```text title="targets.txt"
+# Web applications
+https://app.example.com
+https://admin.example.com
+
+# APIs
+https://api.example.com
+
+# Staging
+# https://staging.example.com  ← commented out, will be skipped
+```
+
+---
+
+## Combining `--url` and `--list`
+
+Both source types can be used together in the same command. All URLs from every `-u` value and every `-L` file are collected, normalised, and **deduplicated** (preserving original order) before scanning begins. A URL that appears in both a `-u` flag and a list file will only be scanned once.
+
+```bash
+python3 wstg-scan.py \
+  -u https://web.example.com \
+  -L api_targets.txt \
+  --threads 10
+```
+
+<Note>
+  Deduplication is case-sensitive and applies after URL normalisation (e.g. trailing slashes are handled). The scan order follows the order of first appearance across all sources.
+</Note>
+
+---
+
+## Interactive Multi-Target Mode
+
+When two or more targets are loaded (from any combination of `-u` and `-L`) without `--batch`, WSTG-Scan enters **interactive multi-target mode**. The menu looks the same as single-target mode, but a banner shows all loaded targets:
+
+```text
+====================================================
+  WSTG SCANNER v1.4.2  [Sin autenticación]
+====================================================
+  Modo multi-objetivo: cada opción se ejecuta en los 3 objetivos
+    1. https://a.example.com
+    2. https://b.example.com
+    3. https://c.example.com
+====================================================
+```
+
+Selecting any option runs that module **sequentially against every target in order**. The session prompt reads:
+
+```text
+Selecciona una opción (se aplica a TODOS los objetivos):
+```
+
+### Per-Target State Isolation
+
+Each target maintains its own independent state — its own `SCAN_DATA` dictionary, `FINDINGS` list, and authentication session. Running option 7 (spidering) does not mix URLs from target A into target B's spider results. When you select a module, the tool restores each target's state, runs the module, and saves the state back before moving to the next target.
+
+This means you can:
+
+- Authenticate separately for each target by selecting option 1 (it runs the auth wizard once per target)
+- Run spidering on all targets, then injection tests on all targets — each target's spider data feeds its own injection tests
+- Review results per target with options 16 and 17
+
+### Reports in Interactive Multi-Target Mode
+
+When you exit (option 18 or `Ctrl+C`), if any target has scan data the tool prompts whether to save a report for each target:
+
+```text
+¿Guardar un reporte por objetivo? [S/n]:
+```
+
+Reports are saved to `reports/<host>/<host>.{txt,json,html,md}` for each target automatically. For example, scanning `https://a.example.com` and `https://b.example.com` produces:
+
+```
+reports/
+  a.example.com/
+    a.example.com.txt
+    a.example.com.json
+    a.example.com.html
+    a.example.com.md
+  b.example.com/
+    b.example.com.txt
+    b.example.com.json
+    b.example.com.html
+    b.example.com.md
+```
+
+---
+
+## Batch Mode (`--batch`)
+
+Batch mode is the fully non-interactive path: WSTG-Scan runs a complete pentest (`run_full_pentest`) on each target in sequence, saves a report automatically after each one, and prints a global summary table when all targets are done. No menu is shown and no prompts are displayed during scanning.
+
+```bash
+# Batch from a list file
+python3 wstg-scan.py -L targets.txt --batch
+
+# Batch with multiple -u targets and tuned performance
+python3 wstg-scan.py \
+  -u https://a.example.com \
+  -u https://b.example.com \
+  --batch \
+  --threads 10 \
+  --timeout 20
+
+# Batch combining -u and -L with a pre-set report base path
+python3 wstg-scan.py \
+  -u https://web.example.com \
+  -L api_targets.txt \
+  --batch \
+  --output /tmp/pentest_run
+```
+
+<Warning>
+  `--batch` requires at least one target specified via `--url` or `--list`. Supplying `--batch` without any target source causes an immediate error and exits.
+</Warning>
+
+### What Batch Mode Runs
+
+For each target, batch mode executes all modules in this order:
+
+1. General information and enumeration
+2. Nmap port scan (`-sV`)
+3. Nuclei vulnerability analysis
+4. VHost / subdomain fuzzing
+5. Directory fuzzing
+6. Spidering
+7. Source code analysis (over all spider URLs)
+8. Injection tests (SQLi, XSS, LFI, command injection, open redirect)
+9. Advanced security tests (SSRF, SSTI, XXE, CRLF, smuggling, cache poisoning)
+10. API tests (OWASP API Top 10)
+11. User enumeration and bruteforce
+12. WordPress attacks (if WordPress is detected on the target)
+
+<Note>
+  The **Active Directory module (option 14) is skipped in batch mode** because it requires interactive input for the domain name, DC address, and optional credentials. All other 12 modules run in full for every target.
+</Note>
+
+### Interrupting Batch Mode
+
+Pressing `Ctrl+C` during a batch run stops the current target's scan. The tool then asks:
+
+```text
+¿Continuar con el siguiente objetivo? [S/n]:
+```
+
+Answering `S` saves a partial report for the interrupted target and moves on. Answering `N` (or pressing `Ctrl+C` again) ends the batch immediately after saving partial results.
+
+### Per-Target Reports and Global Summary
+
+After each target finishes, a report is saved automatically to `reports/<host>/`. On completion of all targets, a summary table is displayed:
+
+```text
+╔══════════════════════════════════════════╦═══════════╦══════════════╗
+║ Objetivo                                 ║ Hallazgos ║ Estado       ║
+╠══════════════════════════════════════════╬═══════════╬══════════════╣
+║ https://a.example.com                    ║        24 ║ ok           ║
+║ https://b.example.com                    ║        11 ║ ok           ║
+║ https://c.example.com                    ║         3 ║ interrumpido ║
+╚══════════════════════════════════════════╩═══════════╩══════════════╝
+
+Resumen batch (3 objetivos):
+```
+
+Each row shows the target URL, the total number of findings recorded, and the final status (`ok`, `interrumpido`, or `error`).
+
+---
+
+## Report Directory Structure
+
+Regardless of whether you use interactive multi-target mode or batch mode, per-target reports are always saved under `reports/<host>/`:
+
+```
+reports/
+  app.example.com/
+    app.example.com.txt    ← Plain-text summary with all sections
+    app.example.com.json   ← Full serialised scan data
+    app.example.com.html   ← Interactive SaaS dashboard (light/dark theme)
+    app.example.com.md     ← Markdown report for GitBook / GitHub / Obsidian
+  api.example.com/
+    api.example.com.txt
+    api.example.com.json
+    api.example.com.html
+    api.example.com.md
+```
+
+The `--output` flag, when provided, sets a base path for **single-target** sessions. In multi-target and batch modes the per-host directory structure under `reports/` is always used.

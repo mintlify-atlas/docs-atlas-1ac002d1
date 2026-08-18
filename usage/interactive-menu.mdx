@@ -1,0 +1,274 @@
+---
+title: "WSTG-Scan Interactive Menu: All 18 Options Explained"
+sidebarTitle: "Menu"
+description: "Complete guide to every WSTG-Scan menu option — what each module does, when to use it, prerequisites, and how options 16 and 17 appear."
+---
+
+When WSTG-Scan starts with a single target, it presents a numbered interactive menu that lets you run any scan module independently, in any order, accumulating results into a shared session. Every option you choose re-uses the same HTTP session (including any authentication you have configured), so findings from earlier modules are automatically available to later ones — for example, the URLs discovered by the spider (option 7) feed directly into the source-code analyser (option 8) and injection tests (option 9).
+
+## The Menu
+
+```text
+ _       __       __         _____                   
+| |     / /_____ / /_ ____ _/ ___/ _____ ____ _ ____ 
+| | /| / // ___// __// __ `/\__ \ / ___// __ `// __ \
+| |/ |/ /(__  )/ /_ / /_/ /___/ // /__ / /_/ // / / /
+|__/|__//____/ \__/ \__, //____/ \___/ \__,_//_/ /_/ 
+                   /____/                            
+
+OWASP Web Security Testing Scanner
+developed by @afsh4ck
+
+====================================================
+  WSTG SCANNER v1.4.2  [Sin autenticación]
+====================================================
+ 1. Configurar autenticación (login / headless SPA / OAuth2)
+ 2. Información general y enumeración
+ 3. Escaneo de puertos con Nmap (-sV + NSE dirigido)
+ 4. Análisis de vulnerabilidades con Nuclei
+ 5. Fuzzing de subdominios (vhost) con ffuf
+ 6. Fuzzing de directorios (usa ffuf si está instalado)
+ 7. Spidering / Mapeo completo del sitio
+ 8. Análisis de código fuente (credenciales/secretos en HTML y JS)
+ 9. Pruebas de inyección (SQLi, XSS, Path Traversal, Command Injection)
+10. Pruebas avanzadas (SSRF / SSTI / XXE / CRLF / Smuggling / Cache)
+11. Pruebas de API (descubrimiento, IDOR, mass assignment, JWT, Rate limit)
+12. Enumeración de usuarios/emails y fuerza bruta de contraseñas
+13. Enumeración y ataques WordPress (WPScan)
+14. Pentesting Active Directory (Kerbrute/LDAP/NXC)
+15. PENTESTING COMPLETO (ejecuta todas las pruebas anteriores)
+                                          (tras escanear aparecen)
+16. Mostrar resumen en Markdown
+17. Mostrar tablas de resultados
+                                          (siempre visible)
+18. Salir
+====================================================
+Selecciona una opción:
+```
+
+The header line shows the current authentication state — `[Sin autenticación]` before configuring credentials, `[Autenticado]` once option 1 succeeds.
+
+<Tip>
+  Modules 2–14 can be run in any order within a session. Results accumulate in `SCAN_DATA` and `FINDINGS` so that, for instance, running the spider first and then injection tests means injection payloads are sent to every form and input the spider discovered, rather than only the home page. Mixing and re-running modules in the same session is fully supported.
+</Tip>
+
+---
+
+## Option Reference
+
+<Accordion title="1 — Configure Authentication">
+  **What it does:** Launches the authentication wizard to establish a logged-in HTTP session for all subsequent scan modules. Supports four modes: Basic Auth, HTML form login, headless Playwright login (for SPAs and OAuth2/PKCE flows), and manual session mode (paste cookie / Authorization header). See the [Authentication page](/usage/authentication) for detailed step-by-step instructions.
+
+  **When to use it:** Run this first whenever the target application requires a login. Modules 2–14 will automatically use the authenticated session once option 1 has succeeded.
+
+  **Prerequisites:** The target must be reachable. For headless login, Playwright must be installed (the wizard offers to install it automatically).
+</Accordion>
+
+<Accordion title="2 — General Information and Enumeration">
+  **What it does:** Performs a broad reconnaissance sweep of the target:
+  - HTTP response headers, status code, and server banner
+  - Technology fingerprinting via `whatweb` (with header-based fallback)
+  - Security headers audit: HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy
+  - Cookie security flags: `Secure`, `HttpOnly`, `SameSite`
+  - `robots.txt` and `sitemap.xml` parsing — disallowed and allowed paths are logged
+  - HTTP methods enumeration (OPTIONS + TRACE detection)
+  - SSL/TLS certificate analysis
+  - Advanced CORS testing: wildcard with credentials, reflected origin, preflight with malicious origins
+
+  **When to use it:** Always run early in a pentest. It populates `SCAN_DATA["general"]` which other modules reference, and produces quick wins like exposed server versions or misconfigured CORS.
+
+  **Prerequisites:** None beyond a reachable target.
+</Accordion>
+
+<Accordion title="3 — Port Scan with Nmap (-sV + Directed NSE)">
+  **What it does:** Runs `nmap -sV` against the hostname extracted from the target URL to detect open ports, services, and version information. Results are parsed from XML output and displayed in a colour-coded table. Every open port is recorded in `FINDINGS` with a `[PORT]` prefix and appears as its own section in all generated reports.
+
+  **When to use it:** Use it when you want to expand the attack surface beyond the web application — discovering non-HTTP services (databases, SSH, SMB, etc.) that may be reachable from the target host.
+
+  **Prerequisites:** `nmap` must be installed. The tool will auto-install it via `apt` if it is missing and you confirm the prompt. The default scan timeout is 600 seconds; it can be interrupted with `Ctrl+C` and partial results are saved.
+</Accordion>
+
+<Accordion title="4 — Vulnerability Analysis with Nuclei">
+  **What it does:** Runs the Nuclei scanner against the target using all available templates (10,000+). Results are deduplicated by `(template_id, url, severity)` and categorised by severity. Critical, high, medium, and low findings are summarised in a table and written to `FINDINGS`. Interactsh noise (`Could not unmarshal interaction data`) is automatically filtered from output.
+
+  **When to use it:** Run it after basic reconnaissance to catch known CVEs, misconfigurations, exposed panels, and tech-stack-specific vulnerabilities quickly and comprehensively.
+
+  **Prerequisites:** Nuclei 3.x must be installed (`sudo apt install nuclei` or the official Go binary). The tool will offer to auto-install it via `apt` if missing. Template updates are recommended (`nuclei -update-templates`).
+</Accordion>
+
+<Accordion title="5 — Subdomain Fuzzing (VHost) with ffuf">
+  **What it does:** Fuzzes virtual hosts by sending `Host: FUZZ.<domain>` headers with `ffuf`. An initial probe with an invalid hostname establishes a baseline `Content-Length` that is used as a `-fs` filter to eliminate false positives. If the target is an IP address, it prompts for the base domain manually.
+
+  **Wordlist default:** `Discovery/DNS/namelist.txt` from SecLists. A custom path can be entered at the prompt.
+
+  **When to use it:** When you suspect the target hosts multiple virtual hosts or subdomains on the same IP — common in CTF machines, HackTheBox, and development environments with custom `/etc/hosts` entries.
+
+  **Prerequisites:** `ffuf` is recommended (`sudo apt install ffuf`); the tool falls back to an internal multi-threaded method if `ffuf` is absent. SecLists should be installed for the default wordlist.
+</Accordion>
+
+<Accordion title="6 — Directory Fuzzing">
+  **What it does:** Discovers hidden directories and files on the target web server using `ffuf` (preferred) or the internal multi-threaded fallback. A baseline request filters out wildcard 200 responses (`-fs` and `-ac`). Results are displayed in a table sorted by HTTP status code.
+
+  **Wordlists:** Defaults to `raft-small-directories.txt` from SecLists; prompts for a custom path if the default is unavailable.
+
+  **When to use it:** Early in reconnaissance to uncover admin panels, backup files, development endpoints, and other paths not linked from the main application.
+
+  **Prerequisites:** `ffuf` and SecLists are recommended but not required — internal fallback covers both.
+</Accordion>
+
+<Accordion title="7 — Spidering / Full Site Mapping">
+  **What it does:** Crawls the target recursively using breadth-first search (BFS), following links up to a configurable depth and page count. It detects HTML forms including their inputs (excluding submit/button/file types) and deduplicates forms by `(action, method, inputs)`. Results are stored in `SCAN_DATA` and used by the source-code analyser and injection tests.
+
+  **When to use it:** Run before injection tests (option 9) and source-code analysis (option 8) to maximise the attack surface those modules cover. Also useful standalone to understand the application's structure.
+
+  **Prerequisites:** None. The `robots.txt` respect option can be configured at the prompt.
+</Accordion>
+
+<Accordion title="8 — Source Code Analysis (Credentials / Secrets)">
+  **What it does:** Downloads HTML, JavaScript, JSON, source maps (`.map`), CSS, YAML, XML, `.env` files, and other resources discovered during spidering (or runs a quick internal spider if no prior spider data exists). It scans each file against 15 pattern catalogues:
+
+  - **Critical:** PEM private keys, database connection strings with embedded credentials
+  - **High:** AWS Access Key/Secret, Google API Key, GitHub/Slack/Stripe tokens, JWT, hardcoded credentials (`password=`, `api_key=`, `bearer=`)
+  - **Medium:** Sensitive HTML comments, Basic Auth in URLs, exposed source maps, private IP ranges
+  - **Low:** Internal paths (`/admin`, `/.git`, `/.env`, `/actuator`), exposed email addresses
+
+  Critical and high findings are written to `FINDINGS` with `[CODE:SEV]` prefixes. Each match includes a ±30-character context snippet. Downloads are capped at 2 MB per file.
+
+  **When to use it:** After spidering, to catch secrets developers accidentally committed or embedded in front-end code.
+
+  **Prerequisites:** None beyond spider data (auto-collected if missing).
+</Accordion>
+
+<Accordion title="9 — Injection Tests (SQLi, XSS, Path Traversal, Command Injection)">
+  **What it does:** Sends injection payloads against all forms and URL parameters discovered by the spider:
+
+  - **SQL Injection:** Error-based, time-based blind, boolean-based probes
+  - **XSS:** Reflected cross-site scripting with contextual analysis
+  - **Path Traversal / LFI:** `/etc/passwd`, `win.ini`, encoding variants, and bypass techniques
+  - **Command Injection:** Linux and Windows payloads
+  - **Open Redirect:** Detection of redirects to arbitrary external hosts
+
+  **When to use it:** After spidering (option 7) to ensure maximum form and parameter coverage.
+
+  **Prerequisites:** Spider data is highly recommended. The authenticated session (option 1) is used automatically if configured.
+</Accordion>
+
+<Accordion title="10 — Advanced Security Tests">
+  **What it does:** Six advanced attack categories:
+
+  - **SSRF:** URL parameters (`url`, `redirect`, `src`, …) and headers (`X-Forwarded-For`, `X-Original-URL`, …); cloud metadata endpoint detection (AWS IMDSv1, GCP, Alibaba); OOB via external collaborator
+  - **SSTI:** Math probes for Jinja2, Twig, FreeMarker, ERB, Pebble, Tornado; engine identification from error messages
+  - **XXE:** XML/SOAP endpoint discovery (`/xmlrpc.php`, `/soap`, `/api/xml`, WSDL); external entity injection with `file:///etc/passwd` and hostname; SSRF via external DTD
+  - **CRLF Injection:** `%0d%0a` payloads in path and redirect parameters; verifies injected headers in non-redirect responses
+  - **HTTP Request Smuggling:** Uses `smuggler.py` if available; manual CL.TE probe via raw socket; installation instructions shown if `smuggler.py` is missing
+  - **Cache Poisoning:** Injects `X-Forwarded-Host`, `X-Host`, `X-Original-URL` with unique random values; checks if the value persists in a follow-up request without the header; detects cache presence via `X-Cache`, `Age`, and `CF-Cache-Status`
+
+  **When to use it:** After basic recon and spidering, for a deeper application-layer attack surface assessment.
+
+  **Prerequisites:** `smuggler.py` is optional for the smuggling sub-module.
+</Accordion>
+
+<Accordion title="11 — API Testing (OWASP API Top 10)">
+  **What it does:** Covers the OWASP API Security Top 10:
+
+  - **Endpoint Discovery:** `/api`, `/swagger`, `/graphql`, `/actuator`, recursive fuzzing, OpenAPI/Swagger parsing
+  - **IDOR / BOLA (API1):** Numeric ID, UUID, and parameter manipulation with a control probe to eliminate false positives
+  - **JWT (API2):** Header, cookie, and body detection; `alg:none` bypass; RS256→HS256 confusion; `kid` path traversal/SQLi; HMAC secret brute-force; expired token acceptance
+  - **Rate Limiting (API4):** 429 detection, soft-block via progressive latency, CAPTCHA, repeated 403 IP-ban detection
+  - **Auth Bypass (API5):** `X-Original-URL`, `X-Rewrite-URL`, `X-Forwarded-For` header manipulation
+  - **Mass Assignment (API6):** Injection of `is_admin`, `role`, `privilege` with re-GET persistence check
+  - **Verbose Errors (API7):** Stack trace and internal path detection
+  - **CORS / GraphQL (API8):** Introspection queries, user enumeration
+
+  **When to use it:** Whenever the target exposes a REST, GraphQL, or SOAP API — run after spidering for discovered endpoint coverage.
+
+  **Prerequisites:** None, though authenticated sessions improve IDOR and mass assignment test coverage.
+</Accordion>
+
+<Accordion title="12 — User Enumeration and Password Bruteforce">
+  **What it does:** Two-phase attack:
+
+  1. **User enumeration** — harvests usernames from API endpoints (`/api/users`, etc.) and differential HTTP responses from login forms
+  2. **Password bruteforce** — attempts credential attacks against discovered users using `hydra` (with `-t 4 -I -u` flags for reliability) and a CSRF-aware internal fallback (`requests.Session` that maintains cookies and hidden fields)
+
+  Auto-detection of the login failure message: the tool sends impossible credentials, extracts candidate failure phrases from the HTML response, and prompts you to confirm the correct one. Supports custom wordlists and SecLists paths.
+
+  **When to use it:** When you want to find valid credentials or enumerate accounts for further exploitation.
+
+  **Prerequisites:** `hydra` is recommended for bruteforce (`sudo apt install hydra`); the CSRF-aware fallback works without it.
+</Accordion>
+
+<Accordion title="13 — WordPress Enumeration and Attacks (WPScan)">
+  **What it does:** WordPress-specific attack module:
+  - User enumeration and login path discovery
+  - WordPress core version detection
+  - Installed plugin and theme detection
+  - Known CVE lookup for discovered plugins and themes
+  - Login bruteforce with configurable wordlists via WPScan
+
+  **When to use it:** Only against targets identified as WordPress installations — running it on non-WordPress sites will produce no results.
+
+  **Prerequisites:** `wpscan` must be installed. The tool will offer to auto-install it via `apt` if missing.
+</Accordion>
+
+<Accordion title="14 — Active Directory Pentesting (Kerbrute / LDAP / NXC)">
+  **What it does:** Orchestrates standard Kali Active Directory tools in two modes — unauthenticated (enumeration only) or authenticated (deeper attacks):
+
+  - **User enumeration** via `kerbrute userenum` with a wordlist
+  - **LDAP queries** (`ldapsearch`) for users, groups, and computers in the domain
+  - **SMB enumeration and attacks** via `netexec` / `nxc smb` including password spraying and bruteforce
+  - **AS-REP Roasting** via `impacket-GetNPUsers` against accounts without Kerberos pre-authentication
+  - **Kerberoasting** via `impacket-GetUserSPNs -request` to extract service account hashes
+
+  All discovered hashes and credentials are written to `FINDINGS` and appear in an "Active Directory" section in the HTML and Markdown reports.
+
+  **When to use it:** When the target is a domain-joined application or the host is part of an Active Directory environment — this is common in internal network pentests and enterprise CTFs.
+
+  **Prerequisites:** `kerbrute`, `ldap-utils`, `netexec`/`nxc`, and `impacket-scripts` should be installed. This module is **skipped in `--batch` mode** because it requires interactive domain and credential input.
+</Accordion>
+
+<Accordion title="15 — Full Pentest (Chains All Modules)">
+  **What it does:** Executes all scan modules automatically in the following order, passing results from each phase to the next:
+
+  1. Information gathering (2)
+  2. Nmap port scan (3)
+  3. Nuclei vulnerability analysis (4)
+  4. VHost fuzzing (5)
+  5. Directory fuzzing (6)
+  6. Spidering (7)
+  7. Source code analysis — uses all URLs from the spider (8)
+  8. Injection tests (9)
+  9. Advanced security tests (10)
+  10. API tests (11)
+  11. User enumeration and bruteforce (12)
+  12. WordPress attacks — only if WordPress is detected (13)
+  13. Active Directory — prompts whether to run (14)
+
+  After all modules complete, a final summary is printed and you are prompted to save the report.
+
+  **When to use it:** For a comprehensive single-command pentest of a target — ideal for the first pass on a new scope or as the basis for a full security assessment report.
+
+  **Prerequisites:** All optional tools (`nmap`, `nuclei`, `ffuf`, `hydra`, `wpscan`, AD tools) expand coverage but are not required. The tool gracefully handles missing dependencies.
+</Accordion>
+
+<Accordion title="16 — Show Markdown Summary (conditional)">
+  **What it does:** Prints the full scan report as standard Markdown directly to the terminal — ready to copy and paste into GitBook, GitHub issues, Obsidian, or any Markdown-compatible platform. The block covers all populated sections: general info, Nmap results, findings, Nuclei output, API tests, VHosts, directories, spider surface, source code analysis, WordPress, Active Directory, and credentials.
+
+  **Availability:** This option only appears in the menu **after at least one scan module has produced data**. It is not shown on a fresh session with no scan results.
+
+  **When to use it:** When you want a quick shareable summary without generating full report files, or to preview the Markdown before saving.
+</Accordion>
+
+<Accordion title="17 — Show Result Tables (conditional)">
+  **What it does:** Re-prints all visual result tables for the current session — the same tables that each module displays after running, formatted with box-drawing characters and severity colours. Useful for reviewing accumulated results mid-session without having to scroll back through module output.
+
+  **Availability:** Like option 16, this option only appears in the menu **after scan data exists**. On a new session it is hidden.
+
+  **When to use it:** During a long session when you want to review what has been found so far before deciding which module to run next.
+</Accordion>
+
+<Accordion title="18 — Exit">
+  **What it does:** Exits WSTG-Scan. If scan data exists in the current session and `--output` was not specified on the command line, you are prompted whether to save the report before quitting.
+
+  **When to use it:** Always use option 18 (or `Ctrl+C` at the menu prompt) to exit gracefully — this ensures partial scan data is offered for saving rather than being lost.
+</Accordion>

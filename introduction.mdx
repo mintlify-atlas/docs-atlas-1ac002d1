@@ -1,0 +1,101 @@
+---
+title: "WSTG-Scan: OWASP Web Security Testing Guide Scanner"
+sidebarTitle: "Introduction"
+description: "An interactive CLI tool that automates OWASP WSTG methodology with 15 scanning modules, external tool integrations, and multi-format reporting."
+---
+
+WSTG-Scan is an interactive, comprehensive web security testing tool built for pentesters and bug bounty hunters. Written in Python, it implements the full [OWASP Web Security Testing Guide (WSTG)](https://owasp.org/www-project-web-security-testing-guide/) and the [OWASP API Security Top 10](https://owasp.org/API-Security/) methodology through a guided terminal menu. Rather than stringing together a dozen separate tools manually, WSTG-Scan orchestrates reconnaissance, fuzzing, injection testing, authentication analysis, and report generation from a single entry point — keeping all session state, findings, and results in one place across every module you run.
+
+## Who It's For
+
+WSTG-Scan is designed for two primary audiences:
+
+- **Pentesters** performing structured, methodology-driven assessments who need repeatable workflows, authenticated scans, and professional-grade reports.
+- **Bug bounty hunters** who need rapid, wide-coverage enumeration across many targets, with batch mode for running against a full target list automatically.
+
+Both groups benefit from the tool's ability to carry a live authenticated session (including headless Playwright login for SPAs and OAuth2 flows) through every subsequent test module.
+
+## The OWASP WSTG Methodology
+
+The [OWASP Web Security Testing Guide](https://owasp.org/www-project-web-security-testing-guide/) is the industry-standard reference for web application security assessments. WSTG-Scan maps its modules directly to WSTG categories: information gathering, configuration testing, authentication testing, session management, input validation, API security (OWASP API Top 10), and more. Each scan option in the interactive menu corresponds to one or more WSTG test cases, giving every finding a traceable methodology reference.
+
+## The 15 Scanning Modules
+
+The main menu exposes 15 distinct testing capabilities (options 1–15), covering the full OWASP WSTG lifecycle:
+
+| # | Module | What It Tests |
+|---|--------|---------------|
+| 1 | **Authentication Setup** | Basic Auth, HTML form login, headless SPA/OAuth2 (Playwright), manual cookie/token session |
+| 2 | **General Info & Enumeration** | Server headers, SSL/TLS, cookies, CORS, security headers, robots.txt, sitemap, technology fingerprinting |
+| 3 | **Port Scan (Nmap)** | Open ports, service versions via `nmap -sV`; results fed into findings and reports |
+| 4 | **Vulnerability Analysis (Nuclei)** | 10,000+ Nuclei templates; deduplicated by template ID, URL, and severity |
+| 5 | **Subdomain/VHost Fuzzing (ffuf)** | Virtual-host enumeration with `ffuf`; Content-Length baseline to eliminate false positives |
+| 6 | **Directory Fuzzing** | Path enumeration via `ffuf` or internal multi-threaded method; wildcard-filter baseline |
+| 7 | **Spidering** | BFS crawling with form and input discovery; results shared with injection and source-code modules |
+| 8 | **Source Code Analysis** | Scans JS, JSON, source maps, `.env`, CSS, XML for credentials, API keys, JWTs, PEM keys, and sensitive comments |
+| 9 | **Injection Testing** | SQLi (error-based, time-based, boolean), XSS, Path Traversal/LFI, Command Injection, Open Redirect |
+| 10 | **Advanced Security Tests** | SSRF, SSTI (Jinja2/Twig/FreeMarker/ERB), XXE, CRLF Injection, HTTP Request Smuggling, Cache Poisoning |
+| 11 | **API Testing (OWASP API Top 10)** | Endpoint discovery, IDOR/BOLA, JWT attacks, rate limiting, auth bypass, Mass Assignment, GraphQL introspection |
+| 12 | **User Enumeration & Brute Force** | User/email enumeration from APIs and differential forms; password brute-force with Hydra + CSRF-aware fallback |
+| 13 | **WordPress Testing (WPScan)** | Core version, plugin/theme CVEs, user enumeration, targeted brute-force |
+| 14 | **Active Directory Pentesting** | Kerbrute, LDAP queries, NetExec SMB, AS-REP Roasting and Kerberoasting via Impacket |
+| 15 | **Full Pentest** | Chains all modules (2–14) automatically; generates a per-target report on completion |
+
+## External Tool Integrations
+
+WSTG-Scan acts as an orchestrator for best-in-class external tools. When a tool is not found, the scanner will offer to auto-install it via `apt`:
+
+<CardGroup cols={2}>
+  <Card title="Nuclei" icon="shield">
+    10,000+ community templates from ProjectDiscovery. Used in module 4 for broad vulnerability coverage. Auto-installed via `apt` or `go install` if missing.
+  </Card>
+  <Card title="Nmap" icon="radar">
+    Service version detection (`-sV`) with XML output parsing. Used in module 3 for port scanning. Auto-installed via `apt` if missing.
+  </Card>
+  <Card title="ffuf" icon="magnifying-glass">
+    High-speed HTTP fuzzer for directory enumeration (module 6) and subdomain/vhost discovery (module 5) with baseline filtering.
+  </Card>
+  <Card title="Hydra" icon="key">
+    Network login brute-forcer used in module 12 with a CSRF-aware internal fallback for targets that use session tokens.
+  </Card>
+  <Card title="WPScan" icon="wordpress">
+    WordPress-specific scanner for plugin/theme CVEs, user enumeration, and credential attacks in module 13.
+  </Card>
+  <Card title="Impacket" icon="server">
+    `impacket-GetNPUsers` and `impacket-GetUserSPNs` power AS-REP Roasting and Kerberoasting in the Active Directory module (14).
+  </Card>
+</CardGroup>
+
+## Report Formats
+
+After any scan session, WSTG-Scan can generate four report formats saved to `reports/<host>/`:
+
+| Format | Description |
+|--------|-------------|
+| **TXT** | Plain-text summary with per-category sections; suitable for terminal review and archival |
+| **JSON** | Fully serialized findings data; ideal for ingesting into other tools or pipelines |
+| **Markdown** | Standard Markdown output ready to paste into GitBook, GitHub, or Obsidian |
+| **HTML** | Interactive SaaS-style dashboard with light/dark theme, collapsible sidebar, live table search, severity KPIs, and PDF export |
+
+## Authorized Use Disclaimer
+
+<Warning>
+  WSTG-Scan is a powerful offensive security tool. **Use it only on systems for which you have explicit written authorization.** Unauthorized access to computer systems is illegal under the Computer Fraud and Abuse Act (US), the Computer Misuse Act (UK), and equivalent laws worldwide. The author assumes no liability for misuse. Always obtain written consent before testing any system you do not own.
+</Warning>
+
+## Explore the Docs
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Set up Python dependencies, the virtual environment, and optional external tools on Kali Linux or Debian/Ubuntu.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Run your first scan interactively or via CLI arguments in under five minutes.
+  </Card>
+  <Card title="CLI Arguments" icon="terminal" href="/usage/cli-arguments">
+    Full reference for `--url`, `--batch`, `--threads`, `--delay`, `--insecure`, and all other flags.
+  </Card>
+  <Card title="Authentication" icon="lock" href="/usage/authentication">
+    Configure Basic Auth, HTML form login, headless Playwright sessions, and manual cookie/token injection.
+  </Card>
+</CardGroup>

@@ -1,0 +1,138 @@
+---
+title: "Injection Testing: SQLi, XSS, LFI, RCE, Redirect"
+sidebarTitle: "Injection Tests"
+description: "Run all injection tests against forms discovered by the spider: SQLi, XSS, path traversal, command injection, and open redirect detection."
+---
+
+Menu option 9 runs the full suite of classic web injection tests against every form and GET parameter discovered during spidering. Rather than blindly firing payloads at the root URL, WSTG-Scan first crawls the target (up to 250 pages, depth 3) to collect real form `action` endpoints, field names, and URL query parameters — then drives each payload through those concrete injection points. This approach maximises coverage while keeping request volume proportional to the application's actual surface.
+
+<Info>
+  Spidering must have run (option 7) or will be triggered automatically before injection tests begin. Form results are deduplicated by `(action, method, inputs)` so the login form appearing in every navbar header is only tested once.
+</Info>
+
+## How Injection Points Are Collected
+
+Before sending a single payload, the module calls `extract_forms_and_params`, which launches a BFS spider and returns two structures:
+
+- **Forms** — each entry carries `action` URL, HTTP method (`GET`/`POST`), and a sorted list of input field names (submit/button/file/image/reset types are excluded).
+- **GET parameters** — query-string keys harvested from `<a href>` tags and from the URL of every visited page.
+
+All discovered forms and parameters feed directly into each of the injection test functions below.
+
+---
+
+## SQL Injection
+
+WSTG-Scan tests for three distinct SQLi classes using the payloads defined in `SQL_PAYLOADS`:
+
+<Tabs>
+  <Tab title="Error-Based">
+    Payloads that produce database error messages in the HTTP response. The scanner checks the response body for common RDBMS error strings after submitting each payload.
+
+    ```python title="Error-based payloads"
+    "'"
+    "''"
+    '"'
+    '\\'
+    "' OR '1'='1"
+    "' OR 1=1--"
+    "1 AND 1=1"
+    "1 AND 1=2"
+    "' UNION SELECT NULL--"
+    "'; DROP TABLE users--"
+    ```
+  </Tab>
+  <Tab title="Time-Based Blind">
+    Payloads that trigger deliberate delays (MySQL `SLEEP`, nested subqueries). The scanner measures elapsed time per request; a response taking longer than `DEFAULT_TIMEOUT + 2` seconds flags the parameter as potentially vulnerable.
+
+    ```python title="Time-based blind payloads"
+    "' OR SLEEP(5)-- "
+    "1' AND (SELECT * FROM (SELECT(SLEEP(5)))a)--"
+    ```
+
+    The timer check is `elapsed > 4` seconds, making it robust against minor network jitter.
+  </Tab>
+  <Tab title="Boolean-Based">
+    The `1 AND 1=1` / `1 AND 1=2` pair tests for differing response content that indicates conditional SQL evaluation. When combined with error-based payloads, boolean differences help confirm injection even when errors are suppressed.
+  </Tab>
+</Tabs>
+
+All twelve `SQL_PAYLOADS` are sent through every discovered form field and GET parameter, via `GET` or `POST` matching the form's method.
+
+---
+
+## Cross-Site Scripting (XSS)
+
+Reflected XSS is tested by submitting each payload and verifying that it appears verbatim (unencoded) in the response body. Contextual analysis focuses on dangerous sink indicators — `<script>` tags and `onerror=` attributes — to reduce false positives from payloads that are reflected but safely encoded.
+
+```python title="XSS payloads (XSS_PAYLOADS)"
+"<script>alert('XSS')</script>"
+'"><script>alert(1)</script>'
+"<img src=x onerror=alert(1)>"
+"javascript:alert('XSS')"
+"<svg/onload=alert(1)>"
+"'-alert(1)-'"
+'"-alert(1)-"'
+```
+
+The check `payload in resp.text and ('<script>' in payload or 'onerror=' in payload)` means only payloads with active script execution sinks trigger a finding, not benign reflections of text that happens to match.
+
+---
+
+## Path Traversal / Local File Inclusion (LFI)
+
+Each `PATH_TRAVERSAL` payload is submitted to every form field and GET parameter. Success is determined by the presence of `root:` (Linux `/etc/passwd`) or `[extensions]` (Windows `win.ini`) in the response body.
+
+```python title="Path traversal payloads (PATH_TRAVERSAL)"
+"../../../../etc/passwd"
+"..\\..\\..\\windows\\win.ini"
+"%2e%2e%2f%2e%2e%2f%2e%2e%2fetc/passwd"
+"....//....//....//etc/passwd"
+```
+
+The payloads cover:
+- **Standard relative traversal** (`../`) for Linux and Windows
+- **URL-encoded** (`%2e%2e%2f`) bypasses for filters that block the literal `..` sequence
+- **Double-slash obfuscation** (`....//`) to evade naive string-replacement defences
+
+---
+
+## Command Injection
+
+Command injection payloads are sent through the same GET/POST vectors. The scanner looks for OS command output signatures: `uid=` (Linux `id`/`whoami` output format) or `Directory of` (Windows `dir` output).
+
+```python title="Command injection payloads (COMMAND_INJECT)"
+"; ls"
+"| dir"
+"|| ping -c 1 127.0.0.1"
+"& whoami"
+"$(whoami)"
+"`whoami`"
+"| net user"
+```
+
+The set spans both Linux (`; ls`, `$(whoami)`, backtick subshell) and Windows (`| dir`, `& whoami`, `| net user`) execution contexts.
+
+---
+
+## Open Redirect
+
+Open redirect detection uses `allow_redirects=False` so the scanner can inspect the raw `Location` header before the client follows it. A finding is raised when the HTTP response is a `3xx` redirect and the `Location` value contains `evil.com` or a protocol-relative `//` prefix.
+
+```python title="Open redirect payloads (OPEN_REDIRECT)"
+"https://evil.com"
+"//evil.com"
+"/redirect?url=https://evil.com"
+```
+
+Both GET and POST methods are tested for each redirect parameter discovered during spidering.
+
+---
+
+## Findings and Reporting
+
+Every confirmed injection is passed to `print_vuln`, which prepends `[VULN]` and appends the finding to the global `FINDINGS` list. All injection results appear in the **Superficie expuesta** section of the HTML dashboard and are included in TXT, JSON, and Markdown reports.
+
+<Tip>
+  Run option 7 (Spidering) before option 9 to ensure the broadest possible form and parameter coverage. If spider data already exists in the session, the injection module reuses it without re-crawling.
+</Tip>

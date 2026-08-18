@@ -1,0 +1,150 @@
+---
+title: "User Enumeration and Password Brute Force Testing"
+sidebarTitle: "Brute Force"
+description: "Automated user enumeration from APIs and form responses, hydra-backed password brute force with CSRF-aware fallback and auto-error-detection."
+---
+
+Menu option 12 combines user enumeration with targeted password brute force. It is designed to minimise false positives through strict heuristics, automatic login-form detection, and a CSRF-aware fallback for applications that use session tokens in forms. Hydra is used as the primary attack engine when available; the built-in Python method takes over seamlessly when Hydra cannot handle the target's authentication flow.
+
+---
+
+## User Enumeration
+
+Two enumeration techniques run in sequence before brute force begins.
+
+### API-Based Enumeration
+
+The module probes a list of common user-listing endpoints with a `GET` request. When a `200 OK` response returns JSON, it parses both `username` and `email` fields from list and dict response bodies:
+
+```python title="Endpoints probed"
+"/api/users"
+"/users"
+"/rest/users"
+"/api/user/list"
+"/admin/users"
+```
+
+Non-JSON responses are scanned for email addresses using a regex, which catches applications that render user lists as HTML.
+
+### Differential Form Enumeration
+
+For login forms that are available, the module submits a known-invalid username (`nonexistent_user_xyz_999`) and checks whether the response body contains phrases like `"user not found"` or `"no existe"`. A distinct error message that names the missing user — rather than a generic credential failure — confirms the application leaks valid usernames.
+
+---
+
+## Login Form Detection
+
+Before launching brute force, the module auto-discovers all login forms by crawling the target URL plus a set of common login paths:
+
+```python title="LOGIN_PATHS"
+"/login", "/signin", "/auth", "/logon", "/login.php", "/login.html",
+"/user/login", "/account/login", "/admin/login", "/wp-login.php"
+```
+
+Each discovered `POST` form is scored based on:
+
+| Signal | Score |
+|--------|-------|
+| URL or page path contains `login`, `signin`, `auth`, `logon` | +4 |
+| Username field is named `username`, `user`, `email`, or `login` | +2 |
+| Username field has any other name | +1 |
+| Password field is named `password`, `pass`, or `passwd` | +2 |
+| Password field has any other name | +1 |
+
+The form with the highest score is selected as the primary login target. If no form is auto-detected, the user is prompted to enter the form URL and field names manually.
+
+---
+
+## Auto-Detection of the Login Error Message
+
+Knowing the exact error message that the application returns for bad credentials is essential for avoiding false positives. The module auto-detects it with a two-step probe:
+
+<Steps>
+  <Step title="Impossible Credentials Probe">
+    Credentials `__wstg_x7z9q__` / `__wstg_x7z9q__` are sent to the primary login form. The response body is stripped of `<script>`, `<style>`, and `<noscript>` tags, then split into lines.
+  </Step>
+  <Step title="Candidate Extraction">
+    Lines containing known failure keywords in Spanish or English (`invalid`, `incorrect`, `wrong`, `failed`, `inválido`, `incorrecto`, `usuario o contraseña`, etc.) are extracted as candidates. Lines shorter than 5 characters or longer than 200 characters are discarded.
+  </Step>
+  <Step title="User Confirmation">
+    Up to five candidates are displayed and the user is asked to confirm which one (if any) is the correct error message. The confirmed phrase is used as the failure oracle for all subsequent brute-force attempts.
+  </Step>
+</Steps>
+
+<Tip>
+  Confirming the error message greatly reduces false positives. If you skip confirmation, the strict heuristic (≥ 2 positive signals) applies automatically.
+</Tip>
+
+---
+
+## Password Brute Force
+
+### Hydra Integration
+
+When Hydra is installed and the user opts in, the module constructs an `http-post-form` attack:
+
+```bash title="Hydra command structure"
+hydra -l <user> -P <wordlist> \
+  -t 4 -I -u \
+  <target_host> http-post-form \
+  "/login:username=^USER^&password=^PASS^:<error_message>"
+```
+
+Key flags:
+- **`-t 4`** — four threads per target, balancing speed and reliability
+- **`-I`** — ignore an existing restore file, ensuring a clean run without stale state
+- **`-u`** — loop users before passwords (username deduplication), matching the outer loop order in the module
+
+Basic Auth targets use `hydra`'s `http-get` module with the same `-t 4 -I -u` flags.
+
+### CSRF-Aware Fallback
+
+When Hydra is unavailable, or when the target uses CSRF tokens that Hydra cannot handle, the module falls back to a Python `requests.Session`-based method. The session:
+
+1. Issues a `GET` to the login page before each attempt to refresh cookies and extract hidden fields (CSRF tokens, nonces, `__RequestVerificationToken`, etc.)
+2. Merges hidden field values into the POST body alongside the username and password
+3. Submits the form and evaluates the response against the confirmed error message or the strict heuristic
+
+This guarantees that every attempt carries a valid CSRF token, which Hydra's stateless approach cannot do.
+
+### Strict Heuristic (No Confirmed Error Message)
+
+When no error message was confirmed during the auto-detection step, the module applies a **two-signal rule** to flag a successful login: at least two of the following must be true in the response, compared to the baseline failure response:
+
+- HTTP status code differs from the failed-login baseline
+- Response body length differs by more than 10 %
+- A session or authentication cookie is set that was absent in the failure response
+- The response URL after redirects differs from the login page URL
+
+Requiring two independent signals prevents a single response-length fluctuation or a cosmetic redirect from being misreported as a valid credential.
+
+---
+
+## Wordlist Support
+
+<CardGroup cols={2}>
+  <Card title="SecLists Passwords" icon="list">
+    **Default path:** `/usr/share/seclists/Passwords/xato-net-10-million-passwords-10000.txt`
+
+    A curated 10 000-entry password list from xato.net, ideal for fast sweeps without triggering account lockout policies.
+  </Card>
+  <Card title="RockYou" icon="lock">
+    **Default path:** `/usr/share/wordlists/rockyou.txt`
+
+    The classic 14-million-entry wordlist. Also supports the gzip-compressed variant at `rockyou.txt.gz`.
+  </Card>
+  <Card title="Custom Wordlists" icon="file-text">
+    Any file path can be supplied at the prompt. Tab-completion is available on Linux/macOS via the built-in `readline` integration.
+  </Card>
+  <Card title="SecLists Usernames" icon="user">
+    **Default user list:** `/usr/share/seclists/Usernames/xato-net-10-million-usernames.txt`
+
+    A shorter shortlist is also available at `.../top-usernames-shortlist.txt` for quick tests.
+  </Card>
+</CardGroup>
+
+---
+
+## Findings and Reporting
+
+Validated credentials are stored in `SCAN_DATA["bruteforce_credentials"]` as objects with `username` and `password` keys. They appear in the **Credenciales** section of the HTML dashboard and are included in all report formats (TXT, JSON, Markdown). The global `FINDINGS` list receives a `[VULN]`-prefixed entry for each confirmed credential pair.

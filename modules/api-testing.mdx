@@ -1,0 +1,201 @@
+---
+title: "API Security Testing: OWASP API Top 10 Coverage"
+sidebarTitle: "API Testing"
+description: "Automated OWASP API Top 10 testing: endpoint discovery, IDOR, JWT attacks, rate limiting, auth bypass, mass assignment, and GraphQL introspection."
+---
+
+Menu option 11 runs a comprehensive API security assessment aligned with the OWASP API Security Top 10. It begins with multithreaded endpoint discovery, then chains seven targeted test modules — each building on the endpoints and tokens found by the previous step. All findings are written to `SCAN_DATA["api_endpoints"]` and the global `FINDINGS` list, appearing in the **API** section of the HTML dashboard.
+
+---
+
+## Endpoint Discovery
+
+Before any attack module runs, WSTG-Scan builds a map of reachable API endpoints using two complementary methods.
+
+### Static Probe List
+
+A curated list of over 120 API paths is probed concurrently using a thread pool (`ThreadPoolExecutor`). The list covers common API roots, versioned paths, resource names, documentation endpoints, monitoring endpoints, and authentication routes:
+
+```python title="Sample from API_ENDPOINTS"
+"/api", "/api/v1", "/api/v2", "/api/v3",
+"/v1", "/v2", "/v3", "/rest", "/rest/v1",
+"/api/users", "/api/me", "/api/profile", "/api/admin",
+"/api/config", "/api/keys", "/api/secrets", "/api/debug",
+"/swagger", "/swagger-ui.html", "/openapi.json", "/openapi.yaml",
+"/api-docs", "/v2/api-docs", "/v3/api-docs", "/redoc",
+"/graphql", "/graphiql", "/api/graphql",
+"/actuator", "/actuator/env", "/actuator/health",
+"/api/auth", "/api/login", "/api/token", "/api/refresh",
+"/.well-known/", "/console", "/h2-console"
+```
+
+### Recursive Fuzzing Under Active Prefixes
+
+When a base prefix (`/api`, `/api/v1`, `/v2`, `/rest`, etc.) returns a non-404 response, the module recursively fuzzes common REST resource names under it. For example, finding `/api/v1` active triggers probes for `/api/v1/users`, `/api/v1/admin`, `/api/v1/transfer`, `/api/v1/keys`, and dozens more from `API_RESOURCES`.
+
+### OpenAPI / Swagger Parsing
+
+When a Swagger or OpenAPI document is discovered (`/swagger.json`, `/openapi.yaml`, `/v2/api-docs`, etc.), the module parses it to extract all defined paths and adds them to the active endpoint map. Exposed documentation is itself reported as an **API9** finding.
+
+<Note>
+  Endpoints are deduplicated by URL before any test module runs. Only endpoints returning non-404/non-5xx responses are retained.
+</Note>
+
+---
+
+## API1 — IDOR / BOLA (Broken Object Level Authorization)
+
+The IDOR module tests every discovered endpoint for insecure direct object references by modifying ID-like values in the URL path and query string.
+
+<Steps>
+  <Step title="ID Extraction">
+    Numeric IDs and UUIDs are extracted from each endpoint's URL path (e.g., `/api/users/42` → ID `42`).
+  </Step>
+  <Step title="ID Manipulation">
+    Adjacent numeric IDs (`id - 1`, `id + 1`, `id + 100`) and a control value (`id + 99999`) are requested. UUID endpoints are tested with a fixed alternate UUID.
+  </Step>
+  <Step title="Anti-FP Control Probe">
+    Before flagging a response as an IDOR, the scanner sends a deliberately out-of-range control ID. If the server returns the same non-empty body for both the modified ID and the control probe, the endpoint is skipped — it returns the same shell for any ID, making a positive result meaningless. Only endpoints that return distinct content for the modified ID (and reject or differ on the control) are flagged.
+  </Step>
+</Steps>
+
+---
+
+## API2 — JWT Security
+
+JWT detection and attack testing is comprehensive. Tokens are searched in:
+
+- **Response headers** (all header values scanned with a regex `eyJ[A-Za-z0-9_-]+\.eyJ[...`)
+- **Cookies** in the response and in the active session jar
+- **Response body** — SPAs embed tokens in HTML and JSON
+- **Active session `Authorization` header**
+- **Discovered API endpoint responses** (up to 15 endpoints checked)
+
+Once a JWT is found, the following attacks are attempted:
+
+<Accordion title="alg:none Bypass">
+  The token header's `alg` field is changed to `"none"` and the signature is stripped. The forged token is sent to the target; if the server responds with the same status as the authenticated session (and not 401/403), the bypass is confirmed.
+</Accordion>
+
+<Accordion title="RS256 → HS256 Key Confusion">
+  When the original token uses RS256 (asymmetric), the module attempts to forge a new token signed with HS256 using the server's public key as the HMAC secret. This exploits libraries that trust the `alg` field from the token header.
+</Accordion>
+
+<Accordion title="kid Path Traversal / SQLi">
+  If the token header contains a `kid` field, the module tests for path traversal (`../../dev/null`) and SQL injection (`' UNION SELECT 'secret'--`) in the `kid` value, which is used by some servers to locate the signing key.
+</Accordion>
+
+<Accordion title="HMAC Secret Brute Force">
+  For HS256/HS384/HS512 tokens, the HMAC secret is brute-forced against a built-in list of common secrets (`secret`, `password`, `changeme`, `jwt_secret`, `app_secret`, etc.) plus up to 2 000 entries from a wordlist file if available.
+
+  ```python title="Default secrets tried"
+  "secret", "password", "123456", "changeme", "admin", "test",
+  "supersecret", "jwt_secret", "app_secret", "mysecret", "",
+  "your-256-bit-secret", "your-secret", "secretkey", "key"
+  ```
+</Accordion>
+
+<Accordion title="Privilege Claim Injection">
+  Common privilege claims (`role: admin`, `is_admin: true`, `permissions: ["admin"]`) are injected into the payload section and the token is re-signed (or unsigned for `alg:none`) to test whether the server accepts elevated claims.
+</Accordion>
+
+<Accordion title="Expired Token Acceptance">
+  The token's `exp` claim is set to a past timestamp; if the server accepts the expired token, the finding is flagged as a session management weakness.
+</Accordion>
+
+---
+
+## API4 — Rate Limiting
+
+The rate limiting module sends a rapid burst of identical requests and observes the server's reaction:
+
+| Signal | Interpretation |
+|--------|---------------|
+| HTTP `429 Too Many Requests` | Hard rate limit enforced |
+| Progressively increasing response latency | Soft-block / leaky-bucket limiting |
+| CAPTCHA challenge in response body | CAPTCHA-based throttling |
+| Streak of `403 Forbidden` responses | IP ban triggered |
+
+The module reports which mechanism was detected and at what request count the limit kicked in.
+
+---
+
+## API5 — Authentication Bypass via Headers
+
+The auth bypass module tests whether restricted endpoints can be accessed by spoofing the originating path or source IP using non-standard forwarding headers:
+
+```
+X-Original-URL: /admin
+X-Rewrite-URL: /admin
+X-Forwarded-For: 127.0.0.1
+```
+
+A **login baseline** is established first: if the unmodified endpoint returns a login redirect, the module excludes it from positive findings to avoid false positives on public authentication walls.
+
+---
+
+## API6 — Mass Assignment
+
+Every discovered `POST`, `PUT`, and `PATCH` endpoint is tested for mass assignment by injecting additional JSON fields alongside the normal request body:
+
+```python title="MASS_ASSIGNMENT_FIELDS"
+{"is_admin": True}
+{"role": "admin"}
+{"admin": True}
+{"isAdmin": True}
+{"privilege": "admin"}
+{"user_role": "administrator"}
+{"account_type": "premium"}
+{"verified": True}
+{"status": "active"}
+{"credits": 9999}
+{"balance": 9999}
+{"permissions": ["admin", "superuser"]}
+```
+
+**Persistence verification:** after each injection, the module performs a re-GET of the same object URL. If the injected field value appears in the subsequent GET response, the mass assignment is confirmed as persistent — not just a reflected echo.
+
+---
+
+## API7 — Verbose Errors
+
+The verbose error module sends intentionally malformed requests (truncated bodies, wrong content types, invalid field values) to each endpoint and scans the response for internal information disclosure:
+
+- Python/Java/PHP stack traces
+- Internal file system paths (`/var/www`, `/app/`, `/home/`)
+- Database query snippets
+- Framework-specific debug output
+
+---
+
+## API8 — CORS and GraphQL
+
+<Tabs>
+  <Tab title="GraphQL Introspection">
+    The module sends an introspection query to every discovered GraphQL endpoint (`/graphql`, `/graphiql`, `/api/graphql`, `/query`, `/api/query`):
+
+    ```graphql
+    { __schema { types { name } } }
+    ```
+
+    A successful response (containing `__schema` in the JSON body) is reported as a finding — introspection enabled in production exposes the full API schema to attackers.
+
+    User enumeration is also tested via `{ users { id username email } }` queries on GraphQL endpoints.
+  </Tab>
+  <Tab title="CORS">
+    Dangerous CORS configurations are tested by sending requests with crafted `Origin` headers:
+
+    - `https://evil.com`
+    - `null`
+    - `https://<target>.evil.com` (subdomain takeover pivot)
+    - `https://evil.<target>` (suffix attack)
+
+    A finding is raised for wildcard `*` combined with `Access-Control-Allow-Credentials: true` (critical), for reflected origins with credentials (high), and for reflected origins without credentials (medium).
+  </Tab>
+</Tabs>
+
+---
+
+## Findings Integration
+
+Every API finding is appended to the global `FINDINGS` list and stored in `SCAN_DATA["api_endpoints"]`. The HTML dashboard renders endpoint status codes, content types, and a detail table for each API test module. Swagger/OpenAPI documentation findings are tagged `[API9]` and highlighted as information disclosure in the report summary.

@@ -1,47 +1,229 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Quickstart: Your First WSTG-Scan Scan in 5 Minutes"
+sidebarTitle: "Quickstart"
+description: "Launch WSTG-Scan interactively or with CLI flags, walk through the main menu, and run a complete automated pentest against a target list."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
+WSTG-Scan supports two operating modes: an **interactive menu** that guides you step by step through each test phase, and a **CLI argument mode** that lets you drive the scanner directly from the command line — including fully unattended batch runs against a list of targets. Both modes use the same underlying scan engine; the difference is only in how you direct it. This guide walks you through both approaches so you can choose the right one for your workflow.
 
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+## Before You Begin
 
-## Prerequisites
+Make sure WSTG-Scan is installed and your virtual environment is active:
 
-Before you begin, you must have:
+```bash
+cd WSTG-Scan
+source venv/bin/activate
+```
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
+<Warning>
+  Only scan systems you are explicitly authorized to test. Unauthorized use is illegal. See the [disclaimer](/introduction#authorized-use-disclaimer) for details.
+</Warning>
 
-## Get started
+## Interactive Mode
+
+Interactive mode is the default. Launch the scanner with no arguments and it prompts you for everything:
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
-
+  <Step title="Launch the scanner">
     ```bash
-    npm install your-package
+    python3 wstg-scan.py
+    ```
+
+    The ASCII banner and version header appear immediately, followed by a prompt asking whether you want to scan a single URL or a list:
+
+    ```
+     _       __       __         _____
+    | |     / /_____ / /_ ____ _/ ___/  _____ ____ _ ____
+    | | /| / // ___// __// __ `/\__ \  / ___// __ `// __ \
+    | |/ |/ /(__  )/ /_ / /_/ /___/ / / /__ / /_/ // / / /
+    |__/|__//____/ \__/ \__, //____/ \___/ \__,_//_/ /_/
+                       /____/
+
+    OWASP Web Security Testing Scanner
+    developed by @afsh4ck
+
+    ====================================================
+      WSTG SCANNER v1.4.2  [Sin autenticación]
+    ====================================================
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
 
-    ```bash
-    your-cli init
+  <Step title="Enter the target URL">
+    Type or paste the full URL of the target application, including the scheme:
+
     ```
+    Target URL: https://example.com
+    ```
+
+    The scanner normalises the URL, extracts the hostname for report naming, and loads the main menu.
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
 
-    ```bash
-    your-cli start
+  <Step title="Explore the main menu">
+    The main menu lists all 15 test modules plus reporting options:
+
     ```
+    ====================================================
+      WSTG SCANNER v1.4.2  [Sin autenticación]
+    ====================================================
+     1. Configurar autenticación (login / headless SPA / OAuth2)
+     2. Información general y enumeración
+     3. Escaneo de puertos con Nmap (-sV + NSE dirigido)
+     4. Análisis de vulnerabilidades con Nuclei
+     5. Fuzzing de subdominios (vhost) con ffuf
+     6. Fuzzing de directorios (usa ffuf si está instalado)
+     7. Spidering / Mapeo completo del sitio
+     8. Análisis de código fuente (credenciales/secretos en HTML y JS)
+     9. Pruebas de inyección (SQLi, XSS, Path Traversal, Command Injection)
+    10. Pruebas avanzadas (SSRF / SSTI / XXE / CRLF / Smuggling / Cache)
+    11. Pruebas de API (descubrimiento, IDOR, mass assignment, JWT, Rate limit)
+    12. Enumeración de usuarios/emails y fuerza bruta de contraseñas
+    13. Enumeración y ataques WordPress (WPScan)
+    14. Pentesting Active Directory (Kerbrute/LDAP/NXC)
+    15. PENTESTING COMPLETO (ejecuta todas las pruebas anteriores)
+                                              (tras escanear aparecen)
+    16. Mostrar resumen en Markdown
+    17. Mostrar tablas de resultados
+                                              (siempre visible)
+    18. Salir
+    ====================================================
+    Selecciona una opción:
+    ```
+
+    Modules 16 and 17 (Markdown summary and results tables) only appear after at least one scan module has run and produced findings.
+  </Step>
+
+  <Step title="(Optional) Configure authentication">
+    If the target requires a login, select **option 1** before running any scan module. The authentication session is then carried through every subsequent test automatically.
+
+    <Tip>
+      For SPAs built with Angular, Vue, or React — or applications using OAuth2/PKCE — WSTG-Scan will automatically attempt headless login via Playwright if a standard HTML form is not found. If Playwright is not installed, the tool will offer to install it. You can also use **manual mode** to paste a session cookie or `Authorization` header directly.
+    </Tip>
+  </Step>
+
+  <Step title="Pick a module and scan">
+    Enter the number of the module you want to run and press Enter. Results are printed to the terminal in real time with colour-coded severity indicators and box-drawing tables. Findings accumulate in the session state across as many modules as you run.
+
+    For a complete assessment in one pass, select **option 15** (Full Pentest). It chains all modules from information gathering through Active Directory and saves one report per target when finished.
+  </Step>
+
+  <Step title="Generate a report">
+    At any point after scanning, press the report option that appears in the menu, or simply let the full pentest (option 15) generate one automatically. Reports are saved to:
+
+    ```
+    reports/<hostname>/<hostname>.txt
+    reports/<hostname>/<hostname>.json
+    reports/<hostname>/<hostname>.md
+    reports/<hostname>/<hostname>.html
+    ```
+
+    The HTML report is a self-contained interactive dashboard with light/dark theme, live table search, severity KPI cards, and one-click PDF export — no server required.
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## CLI Argument Mode
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+For scripted or CI/CD use, pass arguments directly on the command line. All flags can be combined:
+
+```bash title="Single target with HTML report and 10 threads"
+python3 wstg-scan.py --url https://example.com --output report --threads 10 --timeout 15
+```
+
+### Key CLI Flags
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--url` | `-u` | Target URL. Repeatable; also accepts comma-separated values (`-u a.com,b.com`) |
+| `--list` | `-L` | Path to a file with one URL per line (supports `#` comments) |
+| `--batch` | | Non-interactive full pentest on every target; one report per target |
+| `--output` | `-o` | Base path for report files (TXT, JSON, HTML, Markdown all generated) |
+| `--threads` | `-t` | Number of concurrent threads (default: `5`) |
+| `--timeout` | | Per-request timeout in seconds (default: `10`) |
+| `--delay` | `-d` | Delay between every request in seconds — useful for WAF evasion (default: `0`) |
+| `--insecure` | `-k` | Disable TLS certificate verification (labs and self-signed certs) |
+| `--no-color` | | Disable ANSI colour output |
+| `--version` | `-V` | Print the scanner version and exit |
+
+## Basic Scan Workflow
+
+Here is the recommended flow for a structured pentest of a single authenticated web application:
+
+<Steps>
+  <Step title="Launch and provide the target">
+    ```bash
+    python3 wstg-scan.py --url https://target.example.com
+    ```
+  </Step>
+  <Step title="Configure authentication (option 1)">
+    Select option `1` from the menu, choose credential mode (form or Basic Auth), enter the login URL, username, and password. WSTG-Scan validates the session before proceeding.
+  </Step>
+  <Step title="Run general enumeration (option 2)">
+    Collect server headers, SSL/TLS details, cookies, security header analysis, CORS configuration, and technology fingerprinting via WhatWeb.
+  </Step>
+  <Step title="Spider the application (option 7)">
+    BFS crawl discovers all pages and forms. The spider results are reused automatically by modules 8 (source code analysis) and 9 (injection testing) — run it before those two modules for best coverage.
+  </Step>
+  <Step title="Run remaining modules as needed">
+    Select any combination of modules 3–14. Each one adds its findings to the shared session state. You can run them in any order.
+  </Step>
+  <Step title="Generate the report">
+    When done, the scanner prompts you to save. Reports land in `reports/<host>/` in all four formats.
+  </Step>
+</Steps>
+
+## Full Automated Pentest with Batch Mode
+
+For bug bounty programs or large assessments with many targets, use `--batch` combined with `-L` to run a complete, unattended pentest against every URL in a file:
+
+```bash title="Batch pentest against a target list"
+python3 wstg-scan.py -L targets.txt --batch
+```
+
+Where `targets.txt` contains one URL per line:
+
+```text title="targets.txt"
+https://app1.example.com
+https://app2.example.com
+# staging environment
+https://staging.example.com
+https://api.example.com
+```
+
+In batch mode, WSTG-Scan:
+
+1. Reads and deduplicates all URLs from the file (blank lines and `#` comments are ignored).
+2. Runs the full pentest chain (modules 2–13) on each target sequentially.
+3. Saves a separate report set in `reports/<host>/` for each target.
+4. Prints a global summary table of findings per target when all scans complete.
+
+<Note>
+  The Active Directory module (option 14) is skipped in `--batch` mode because it requires interactive input (domain name, optional credentials). Run it separately in interactive mode for AD targets.
+</Note>
+
+You can combine `-u` and `-L` in the same command, and `-u` accepts comma-separated URLs:
+
+```bash title="Combine inline URLs and a target file"
+python3 wstg-scan.py -u https://app1.example.com,https://app2.example.com -L more-targets.txt --batch --threads 10
+```
+
+## Routing Traffic Through Burp Suite
+
+To proxy all WSTG-Scan traffic through Burp Suite (useful for logging requests or replaying them):
+
+```bash
+export HTTP_PROXY=http://127.0.0.1:8080
+export HTTPS_PROXY=http://127.0.0.1:8080
+python3 wstg-scan.py --insecure --url https://target.example.com
+```
+
+Use `--insecure` (`-k`) to disable TLS verification when Burp's certificate is not trusted by the system.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="CLI Arguments Reference" icon="terminal" href="/usage/cli-arguments">
+    Complete reference for every flag, including `--delay`, `--no-color`, and multi-target options.
+  </Card>
+  <Card title="Authentication" icon="lock" href="/usage/authentication">
+    Deep-dive on form login, Basic Auth, Playwright headless login, and manual cookie sessions.
+  </Card>
+</CardGroup>

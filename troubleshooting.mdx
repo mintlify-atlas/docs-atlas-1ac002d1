@@ -1,0 +1,274 @@
+---
+title: "Troubleshooting Common WSTG-Scan Issues and Errors"
+sidebarTitle: "Troubleshooting"
+description: "Fix missing dependencies, Nuclei Interactsh noise, CSRF bruteforce failures, redirect quirks, Playwright setup, and WPScan API token issues."
+---
+
+Most issues with WSTG-Scan fall into one of three categories: missing system dependencies that need to be installed separately, network or redirect behaviors that require tuning a constant, and tool-specific limitations (like Hydra's inability to handle CSRF tokens) that the scanner works around automatically. The entries below cover the most frequently reported problems along with their root cause and fix.
+
+---
+
+<Accordion title="ModuleNotFoundError: No module named 'requests'">
+
+**Symptom:** The script exits immediately at startup with a Python import error such as:
+
+```
+Traceback (most recent call last):
+  ...
+ModuleNotFoundError: No module named 'requests'
+```
+
+**Cause:** The required Python packages are not installed in the active Python environment. WSTG-Scan depends on four packages: `requests`, `beautifulsoup4`, `colorama`, and `tqdm`.
+
+**Fix:** Install all dependencies from `requirements.txt`:
+
+```bash
+pip install -r requirements.txt
+```
+
+If you are using a virtual environment (recommended), make sure it is activated first:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+<Note>
+  On Kali Linux, you may need `pip3` instead of `pip`, or you may need to pass `--break-system-packages` if pip refuses to install outside a virtual environment on newer Debian-based systems. Using a virtual environment avoids this issue entirely.
+</Note>
+
+</Accordion>
+
+<Accordion title="ffuf: command not found">
+
+**Symptom:** When selecting directory fuzzing (option 6) or vhost fuzzing (option 5), the scanner warns that `ffuf` is not available and falls back to the slower internal multithreaded method.
+
+```
+[!] ffuf no encontrado. Usando método interno multihilo.
+```
+
+**Cause:** `ffuf` is an optional external dependency. It is not shipped with every Kali installation and is not auto-installed by WSTG-Scan (unlike Nuclei and WhatWeb).
+
+**Fix:** Install `ffuf` via `apt`:
+
+```bash
+sudo apt install -y ffuf
+```
+
+Or download the latest binary directly from the [official releases](https://github.com/ffuf/ffuf/releases) if you need a newer version than what `apt` provides.
+
+<Tip>
+  After installing `ffuf`, re-run the fuzzing option. The scanner automatically detects the binary via `shutil.which("ffuf")` at the start of each fuzzing call, so no restart is needed.
+</Tip>
+
+</Accordion>
+
+<Accordion title="Nuclei hanging or Interactsh noise">
+
+**Symptom A:** Nuclei produces many lines like the following and seems to stall:
+
+```
+[ERR] Could not unmarshal interaction data: ...
+```
+
+**Symptom B:** Nuclei runs but takes an unusually long time with no findings output.
+
+**Cause:** These messages originate from the [Interactsh](https://github.com/projectdiscovery/interactsh) out-of-band (OOB) callback server that Nuclei uses for blind vulnerability detection. The backend occasionally sends malformed or unreachable callbacks, which Nuclei logs as errors. WSTG-Scan already filters `Could not unmarshal interaction data` lines from the live output stream, so they are suppressed but the underlying Interactsh connections may still slow things down.
+
+**Fix — Filter only (default):** No action needed. The scanner filters `Could not unmarshal interaction data` automatically. The errors are cosmetic and do not affect result quality.
+
+**Fix — Disable Interactsh entirely:** Add `-ni` (no-interactsh) to the Nuclei command in `wstg-scan.py`. Find the Nuclei `cmd` list in the source and append the flag:
+
+```python title="wstg-scan.py — disable Interactsh"
+# Locate the cmd list inside the nuclei scanning function (~line 1066):
+cmd = ["nuclei", "-u", target, "-jsonl-export", json_path]
+
+# Append -ni to disable OOB callbacks:
+cmd = ["nuclei", "-u", target, "-jsonl-export", json_path, "-ni"]
+```
+
+<Note>
+  The `-ni` flag disables only templates that rely on OOB detection. Standard CVE, misconfiguration, exposure, and header-analysis templates continue to run normally.
+</Note>
+
+</Accordion>
+
+<Accordion title="Bruteforce missing credentials with CSRF">
+
+**Symptom:** Hydra reports no valid credentials for one or more usernames, even though you know those credentials are correct. The scanner may print:
+
+```
+[!] Hydra no encontró credenciales para 2 usuario(s). Reintentando con sesión real (CSRF-aware)...
+```
+
+**Cause:** Hydra does not maintain a browser-like session and cannot handle CSRF tokens embedded in login forms as hidden fields. Applications that rotate the CSRF token on every request will reject Hydra's attempts because the token in the POST body is stale by the time the request arrives. Additionally, strict rate limiting or account lockout policies on the server may block Hydra's rapid sequential requests before it finds the correct password.
+
+**Behavior:** WSTG-Scan detects which usernames Hydra failed to crack and automatically retries them using the internal CSRF-aware method. This internal fallback uses a `requests.Session` object that maintains cookies across requests, re-fetches the login form to extract fresh CSRF tokens before each attempt, and respects the configured `REQUEST_DELAY`.
+
+**What to do if the fallback also fails:**
+
+1. **Account lockout:** Check whether the target locks accounts after N failed attempts. If so, reduce the password list or increase the delay between requests via `--delay`.
+2. **Rate limiting:** If the server returns HTTP 429 or adds progressive latency, the scanner's rate-limiting detection (option 12) should catch it. Increase `--delay` to slow the bruteforce.
+3. **Custom error detection:** WSTG-Scan auto-detects the login error message by sending impossible credentials and parsing the response. If the server uses a non-standard error format, you may be prompted to confirm the detected error message during the bruteforce setup.
+
+```bash
+# Slow down all requests to avoid lockout or rate limiting
+python3 wstg-scan.py --url https://target.example.com --delay 1.0
+```
+
+</Accordion>
+
+<Accordion title="Spidering stuck on few pages (TooManyRedirects)">
+
+**Symptom:** The spider logs `Exceeded N redirects` for many URLs and stops after visiting only a handful of pages.
+
+```
+[!] TooManyRedirects: Exceeded 10 redirects.
+```
+
+**Cause:** The target application has long redirect chains—for example, an authentication flow that redirects through several intermediate pages before landing on the final URL. Each redirect counts toward the `MAX_REDIRECTS` limit per request. WSTG-Scan handles `TooManyRedirects` gracefully (it does not abort the spider phase), but affected URLs are skipped and the total crawl depth is reduced.
+
+**Fix:** Increase `MAX_REDIRECTS` in `wstg-scan.py`:
+
+```python title="wstg-scan.py"
+# Default:
+MAX_REDIRECTS = 10
+
+# Increase for applications with long redirect chains:
+MAX_REDIRECTS = 20
+```
+
+<Note>
+  `MAX_REDIRECTS` is applied to the `requests.Session` object via `session.max_redirects`. Increasing it applies to every HTTP call in the session, including fuzzing and injection tests—not just the spider.
+</Note>
+
+</Accordion>
+
+<Accordion title="Playwright not installed (SPA / OAuth2 login fails)">
+
+**Symptom:** When attempting to authenticate against a Single-Page Application (Angular, Vue, React) or an OAuth2/PKCE flow, the scanner warns:
+
+```
+[!] Playwright no instalado. Instalar para soportar SPAs/OAuth2:
+    pip install playwright && playwright install chromium
+[?] Instalar Playwright ahora? [s/N]:
+```
+
+**Cause:** Playwright is an optional dependency used for headless browser login. It is not included in `requirements.txt` because it downloads a ~100 MB Chromium binary and is only needed for JavaScript-rendered login flows. When Playwright is absent and the login URL does not serve a plain HTML `<form>`, the scanner cannot automate the login.
+
+**Fix — Auto-install:** When prompted, type `s` and press Enter. The scanner will run `pip install playwright` followed by `playwright install chromium` automatically.
+
+**Fix — Manual install:**
+
+```bash
+pip install playwright
+playwright install chromium
+```
+
+**Alternative — Manual session mode:** If you do not want to install Playwright, use the manual session option in menu option 1. Complete the login in your browser, copy the full cookie string from the browser DevTools (Application → Cookies), and paste it when prompted.
+
+```
+[?] Cookie completa (ej: PHPSESSID=...; csrftoken=...):
+> PHPSESSID=abc123; csrftoken=xyz456; sessionid=qwerty
+```
+
+</Accordion>
+
+<Accordion title="WPScan not finding CVEs or vulnerability details">
+
+**Symptom:** WPScan runs and detects plugins and themes but reports zero vulnerabilities, or prints a warning about the API token:
+
+```
+[!] No API Token given, as a result vulnerability data has not been output.
+```
+
+**Cause:** WPScan fetches CVE and vulnerability data from the [WPVulnDB](https://wpscan.com/) API. Without a valid API token, this data is not returned. The scanner will still enumerate users, plugins, and themes, but vulnerability matching requires authentication with the WPScan API.
+
+**Fix:** Register for a free API token at [wpscan.com](https://wpscan.com/) (the free tier allows 25 API requests per day). Then provide the token using one of these methods:
+
+<Tabs>
+  <Tab title="Environment Variable (recommended)">
+    ```bash
+    export WPSCAN_API_TOKEN=your_token_here
+    python3 wstg-scan.py
+    ```
+    WSTG-Scan reads `WPSCAN_API_TOKEN` (or `WPVULNDB_API_TOKEN`) automatically before calling WPScan.
+  </Tab>
+  <Tab title="Interactive Prompt">
+    When running option 13 or a full pentest (option 15), the scanner prompts:
+    ```
+    [?] Token API WPVulnDB/WPScan (opcional, Enter para omitir):
+    > your_token_here
+    ```
+    Enter your token when asked. It is passed to WPScan via `--api-token` and is masked in log output.
+  </Tab>
+</Tabs>
+
+<Note>
+  The free WPScan API tier allows 25 requests per day. A single full enumeration run typically uses 1–5 requests depending on the number of plugins and themes detected.
+</Note>
+
+</Accordion>
+
+<Accordion title="302 redirects in directory fuzzing showing wrong results">
+
+**Symptom:** The directory fuzzing results table shows many `302` status codes. Some of these are genuinely protected resources, but others are accessible endpoints that simply redirect to their canonical URL. It can be hard to tell them apart.
+
+**Cause (v1.4.2+ behavior):** Starting with v1.4.2, WSTG-Scan resolves 3xx redirects in authenticated fuzzing mode by following the redirect with the current session and comparing the response to the login page. This produces annotated results.
+
+**How it works:**
+
+The `_resolve_authenticated_status` function runs for every `3xx` hit when a session is active:
+
+1. It first fetches the URL **without** following redirects to read the `Location` header.
+2. If `Location` contains login-path patterns (`/login`, `/signin`, `/auth`, or query parameters like `next=`, `return=`, `redirect=`), the resource is considered **protected**: the original `3xx` status is kept and the `NOTA` column shows `redirige a login (protegido)`.
+3. If the redirect resolves to real content, the table shows the **final status** (e.g., `302→200`) with the actual response size.
+
+**Result columns:**
+
+| Status | NOTA | Meaning |
+|---|---|---|
+| `200` | *(empty)* | Directly accessible |
+| `302→200` | *(empty)* | Redirect followed, real content found |
+| `302` | `redirige a login (protegido)` | Redirect leads to login page — not accessible |
+
+<Tip>
+  To see this behavior, first configure authentication (menu option 1) and then run directory fuzzing (option 6). Without an authenticated session, redirect resolution is skipped and raw 3xx codes are reported.
+</Tip>
+
+</Accordion>
+
+<Accordion title="Nuclei -jsonl-export vs -json-export format mismatch">
+
+**Symptom:** After a Nuclei scan, no findings appear in the report even though Nuclei printed results to the terminal.
+
+**Cause:** Different versions of Nuclei use different export flags. Nuclei v3.x uses `-jsonl-export` (JSON Lines, one JSON object per line). Older versions use `-json-export` (a single JSON array). If WSTG-Scan uses the wrong flag for the installed Nuclei version, the output file is empty.
+
+**Behavior:** WSTG-Scan handles this automatically with a two-attempt fallback:
+
+1. First attempt: `nuclei -u <target> -jsonl-export <tmpfile>`
+2. If the output file is empty or absent: retry with `nuclei -u <target> -json-export <tmpfile>`
+
+When reading the output file, the parser handles both formats:
+- If the file starts with `[`, it is parsed as a JSON array (old format).
+- Otherwise, each line is parsed individually as a JSON object (JSONL format).
+
+**If findings still do not appear:**
+
+```bash
+# Check your Nuclei version
+nuclei -version
+
+# Update Nuclei templates (often fixes parsing issues with new template formats)
+nuclei -update-templates
+
+# Update the Nuclei binary if using apt
+sudo apt update && sudo apt install -y nuclei
+```
+
+<Note>
+  Nuclei v3+ is recommended. The official ProjectDiscovery binaries are usually more up to date than the `apt` package. Install via Go: `go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest`
+</Note>
+
+</Accordion>

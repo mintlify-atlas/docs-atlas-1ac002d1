@@ -1,0 +1,201 @@
+---
+title: "Advanced Configuration Guide for WSTG-Scan Pentest Tool"
+sidebarTitle: "Configuration"
+description: "Edit wordlist paths, thread counts, and timeouts in wstg-scan.py. Route traffic through Burp Suite with proxy env vars and toggle TLS verification."
+---
+
+WSTG-Scan is configured primarily through a set of constants defined near the top of `wstg-scan.py`, between lines 138 and 194. Most day-to-day options—target URL, thread count, timeout, delay, and TLS verification—are also exposed as CLI flags so you do not need to edit the source file for one-off runs. The constants are the right place for persistent changes you want applied across every session: custom wordlist paths, tighter network limits, or a different default thread count for your hardware.
+
+---
+
+## Wordlist Paths
+
+WSTG-Scan relies on [SecLists](https://github.com/danielmiessler/SecLists) for directory fuzzing, vhost discovery, password bruteforcing, and DNS enumeration. The four relevant paths are defined as constants and can be changed to point to any wordlist on your system.
+
+```python title="wstg-scan.py — wordlist constants"
+SECLISTS_SMALL     = "/usr/share/seclists/Discovery/Web-Content/raft-small-directories.txt"
+SECLISTS_MEDIUM    = "/usr/share/seclists/Discovery/Web-Content/directory-list-lowercase-2.3-medium.txt"
+SECLISTS_PASSWORDS = "/usr/share/seclists/Passwords/xato-net-10-million-passwords-10000.txt"
+SECLISTS_DNS       = "/usr/share/seclists/Discovery/DNS/namelist.txt"
+```
+
+<Note>
+  Two additional wordlist constants are also available for user enumeration:
+  `SECLISTS_USERS` (`xato-net-10-million-usernames.txt`) and `SECLISTS_USERS_SHORT`
+  (`top-usernames-shortlist.txt`). RockYou is referenced as `ROCKYOU_WORDLIST`
+  (`/usr/share/wordlists/rockyou.txt`) and its gzipped variant.
+</Note>
+
+The constants are used in the following contexts:
+
+<CardGroup cols={2}>
+  <Card title="SECLISTS_SMALL" icon="folder-magnifying-glass">
+    Default wordlist for **directory fuzzing** (option 6). Preferred over the medium list for speed when ffuf is available. Falls back to `SECLISTS_MEDIUM` if the small list is absent.
+  </Card>
+  <Card title="SECLISTS_MEDIUM" icon="folder-open">
+    Larger wordlist used as the **fallback** for directory fuzzing when `SECLISTS_SMALL` is not found, or selectable manually during the interactive fuzzing prompt.
+  </Card>
+  <Card title="SECLISTS_PASSWORDS" icon="key">
+    Default password list for **Hydra bruteforce** (option 12) and the internal CSRF-aware fallback bruteforcer. Contains 10,000 common passwords from xato-net.
+  </Card>
+  <Card title="SECLISTS_DNS" icon="globe">
+    Wordlist used for **vhost/subdomain fuzzing** (option 5) with ffuf. Sent as `Host: FUZZ.<domain>` headers to discover virtual hosts.
+  </Card>
+</CardGroup>
+
+To change any wordlist, open `wstg-scan.py` in a text editor and update the relevant constant:
+
+```python title="Custom wordlist example"
+# Use a larger custom list for directory fuzzing
+SECLISTS_SMALL = "/opt/wordlists/my-custom-dirs.txt"
+
+# Use a different password list
+SECLISTS_PASSWORDS = "/usr/share/seclists/Passwords/Leaked-Databases/rockyou.txt"
+```
+
+---
+
+## Network and Concurrency Constants
+
+The following constants control per-request behavior, connection pooling, and parallel execution. They are also located near line 138 of `wstg-scan.py`.
+
+```python title="wstg-scan.py — network constants"
+DEFAULT_TIMEOUT = 10   # seconds per request
+MAX_REDIRECTS   = 10   # maximum redirects followed per request
+THREADS         = 5    # concurrent worker threads
+REQUEST_DELAY   = 0.0  # global delay between requests (seconds)
+HTTP_RETRIES    = 2    # retries on transient network errors (connect/read)
+HTTP_POOL_SIZE  = 50   # connection pool size per host
+```
+
+<ParamField path="DEFAULT_TIMEOUT" type="int" default="10">
+  Seconds to wait for a response before abandoning a request. Applied to every HTTP call in every module. Increase for slow or throttled targets; decrease for fast internal networks.
+</ParamField>
+
+<ParamField path="MAX_REDIRECTS" type="int" default="10">
+  Maximum number of redirects the requests session will follow before raising `TooManyRedirects`. If spidering stops after very few pages with redirect errors, increase this value.
+</ParamField>
+
+<ParamField path="THREADS" type="int" default="5">
+  Number of concurrent worker threads used by the vhost, directory, and bruteforce modules. The CLI flag `--threads` (or `-t`) overrides this for a single run without editing the source.
+</ParamField>
+
+<ParamField path="REQUEST_DELAY" type="float" default="0.0">
+  Global delay in seconds applied to **every** HTTP request via a response hook. This is distinct from local sleep calls—it is a single source of truth for rate limiting. Set to `0.5` or higher to evade WAF rate limits on authorized targets. The CLI flag `--delay` (or `-d`) overrides this for a single run.
+</ParamField>
+
+<ParamField path="HTTP_RETRIES" type="int" default="2">
+  Number of automatic retries when a `connect` or `read` error occurs. Does **not** retry on HTTP status codes (4xx/5xx), so `429` and `503` responses reach the module logic intact. Reduces false negatives caused by transient network drops.
+</ParamField>
+
+<ParamField path="HTTP_POOL_SIZE" type="int" default="50">
+  Maximum number of persistent connections per host in the `urllib3` connection pool. The default of 50 prevents bottlenecking multi-threaded modules (vhost, directory, bruteforce) that would otherwise be limited to 10 connections by the urllib3 default.
+</ParamField>
+
+### Editing Constants vs. Using CLI Flags
+
+Some constants have direct CLI equivalents. Use flags for one-off overrides; edit constants for persistent changes.
+
+| Constant | CLI Override | Example Flag |
+|---|---|---|
+| `THREADS` | `--threads`, `-t` | `--threads 10` |
+| `DEFAULT_TIMEOUT` | `--timeout` | `--timeout 20` |
+| `REQUEST_DELAY` | `--delay`, `-d` | `--delay 0.5` |
+| `VERIFY_TLS` | `--insecure`, `-k` | `-k` |
+
+---
+
+## Using Burp Suite as a Proxy
+
+WSTG-Scan honors the standard `HTTP_PROXY` and `HTTPS_PROXY` environment variables. Set them before launching the script and all HTTP requests—including authenticated sessions, fuzzing, and Nuclei invocations via subprocess—will be routed through the specified proxy.
+
+<Steps>
+  <Step title="Start Burp Suite">
+    Open Burp Suite and confirm the proxy listener is running on `127.0.0.1:8080` (the default). Enable **Intercept** if you want to inspect individual requests, or disable it for passive logging.
+  </Step>
+  <Step title="Export the proxy environment variables">
+    ```bash
+    export HTTP_PROXY=http://127.0.0.1:8080
+    export HTTPS_PROXY=http://127.0.0.1:8080
+    ```
+  </Step>
+  <Step title="Launch WSTG-Scan">
+    ```bash
+    python3 wstg-scan.py --url https://target.example.com --insecure
+    ```
+    The `--insecure` flag is required when Burp intercepts TLS traffic with its own certificate, because the default CA bundle will not trust it.
+  </Step>
+  <Step title="Optional: restrict interception to specific modules">
+    You can set the proxy only for specific invocations without modifying the environment permanently:
+    ```bash
+    HTTP_PROXY=http://127.0.0.1:8080 \
+    HTTPS_PROXY=http://127.0.0.1:8080 \
+    python3 wstg-scan.py --url https://target.example.com --insecure
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Always obtain written authorization before routing scan traffic through a proxy. Intercepted requests may contain credentials or session tokens. Clear the Burp proxy history after testing if the environment is shared.
+</Warning>
+
+---
+
+## TLS Verification
+
+By default, WSTG-Scan verifies TLS certificates using the system CA bundle. This is controlled by the `VERIFY_TLS` constant:
+
+```python title="wstg-scan.py"
+VERIFY_TLS = True    # Verificación TLS (desactivable con --insecure)
+```
+
+To permanently disable verification (for lab environments with self-signed certificates), set it to `False`:
+
+```python title="Permanently disable TLS verification"
+VERIFY_TLS = False
+```
+
+For a single run, use the `--insecure` or `-k` flag instead:
+
+```bash
+python3 wstg-scan.py --url https://192.168.1.10 --insecure
+```
+
+<Warning>
+  Disabling TLS verification exposes the connection to man-in-the-middle attacks. Only use `--insecure` or `VERIFY_TLS = False` in isolated lab environments or when explicitly required for proxy interception.
+</Warning>
+
+---
+
+## Disabling Interactsh in Nuclei
+
+Nuclei uses [Interactsh](https://github.com/projectdiscovery/interactsh) by default to test for out-of-band (OOB) vulnerabilities. This can cause noise in the form of `Could not unmarshal interaction data` log messages and may produce unwanted external DNS or HTTP callbacks. WSTG-Scan already filters these messages from the output, but to disable Interactsh entirely you can add the `-ni` flag to the Nuclei command inside `wstg-scan.py`.
+
+Search for the Nuclei subprocess call (look for `nuclei` in a `cmd` list around the Nuclei module) and add `-ni`:
+
+```python title="wstg-scan.py — adding -ni to Nuclei"
+# Before:
+cmd = ["nuclei", "-u", target, "-jsonl-export", tmp_json.name, ...]
+
+# After (disable Interactsh):
+cmd = ["nuclei", "-u", target, "-jsonl-export", tmp_json.name, ..., "-ni"]
+```
+
+<Note>
+  The `-ni` flag only disables the Interactsh callback server. Nuclei will still run all templates that do not rely on OOB detection, so standard CVE, misconfiguration, and exposure templates are unaffected.
+</Note>
+
+---
+
+## Additional Wordlists for Specific Modules
+
+Beyond the four SecLists constants, WSTG-Scan also references user-enumeration wordlists. These are used by option 12 (user/email enumeration and bruteforce):
+
+```python title="wstg-scan.py — user wordlist constants"
+SECLISTS_USERS       = "/usr/share/seclists/Usernames/xato-net-10-million-usernames.txt"
+SECLISTS_USERS_SHORT = "/usr/share/seclists/Usernames/top-usernames-shortlist.txt"
+ROCKYOU_WORDLIST     = "/usr/share/wordlists/rockyou.txt"
+ROCKYOU_WORDLIST_GZ  = "/usr/share/wordlists/rockyou.txt.gz"
+```
+
+Update these paths the same way as the other wordlist constants if your SecLists or RockYou installation is in a non-standard location (for example, on macOS via Homebrew or in a Docker container).

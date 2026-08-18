@@ -1,0 +1,223 @@
+---
+title: "Advanced Security Testing: SSRF, SSTI, XXE, CRLF"
+sidebarTitle: "Advanced Security"
+description: "Six advanced attack modules: SSRF, SSTI, XXE, CRLF injection, HTTP request smuggling, and cache poisoning against real injection points."
+---
+
+Menu option 10 groups six high-impact server-side attack modules under a single interactive phase. Unlike the basic injection tests in option 9, each module here targets injection points discovered by the spider — forms, GET parameters, API endpoints, and directory hits — rather than blindly probing the root URL. Results from all six modules are stored in `SCAN_DATA["advanced_security"]` and appear in the dedicated **Pruebas Avanzadas** section of the HTML dashboard.
+
+<Warning>
+  These tests send crafted HTTP requests that can trigger out-of-band callbacks (SSRF), evaluate server-side template expressions (SSTI), parse external XML entities (XXE), and inject raw CRLF bytes into HTTP headers. Run only against authorised targets.
+</Warning>
+
+---
+
+## SSRF — Server-Side Request Forgery
+
+The SSRF module collects injection vectors from three sources before sending a single probe: GET parameters, POST form fields, and up to 60 of the API endpoints discovered during spidering. For each endpoint, it additionally fuzzes a set of common SSRF parameter names (`url`, `redirect`, `src`, etc.) to catch endpoints whose forms were not captured by the crawler.
+
+### URL Parameter Probes
+
+Payloads are sent through each discovered parameter with deterministic oracles — the response is checked for content that only appears when the server fetched the internal resource, not just content that echoes the payload:
+
+| Target | Oracle markers |
+|--------|---------------|
+| `file:///etc/passwd` | `root:x:0:0:`, `daemon:x:`, `:/bin/bash` |
+| AWS IMDSv1 `http://169.254.169.254/latest/meta-data/` | `ami-id`, `instance-id`, `local-hostname` |
+| GCP metadata `http://metadata.google.internal/computeMetadata/v1/` | `project-id`, `numeric-project-id` |
+| Alibaba Cloud metadata `http://100.100.100.200/latest/meta-data/` | `region-id`, `instance-id` |
+
+### HTTP Header Injection
+
+After URL parameters, the module sends the same cloud-metadata probes via common proxy and forwarding headers against the target root:
+
+```
+X-Forwarded-For
+X-Original-URL
+Client-IP
+Referer
+Origin
+```
+
+### Out-of-Band (OOB) Support
+
+When a collaborator URL is provided (e.g., a Burp Collaborator or interactsh endpoint), the module fires an additional request substituting the collaborator URL for every confirmed or suspected SSRF vector, enabling detection of blind SSRF where no oracle content appears in the response.
+
+```python title="Triggering with a collaborator URL"
+python3 wstg-scan.py
+# Option 10 → prompts for collaborator URL
+```
+
+---
+
+## SSTI — Server-Side Template Injection
+
+SSTI detection uses math probes with a distinctive result (`1337 × 1337 = 1787569`) that cannot appear in the response by coincidence and is not present in the payload itself, eliminating false positives from simple reflection.
+
+### Math Probes by Engine
+
+```python title="SSTI_PROBES"
+("{{1337*1337}}",   "1787569", "Jinja2/Twig/Nunjucks")
+("${1337*1337}",    "1787569", "FreeMarker/Thymeleaf EL")
+("#{1337*1337}",    "1787569", "Ruby/Pebble")
+("<%= 1337*1337 %>","1787569", "ERB/EJS")
+("${{1337*1337}}",  "1787569", "Pebble")
+("%{{1337*1337}}",  "1787569", "Tornado/Mako")
+("[[${1337*1337}]]","1787569", "Thymeleaf")
+("{{1337*'1'}}",    "1337",    "Twig/Jinja2 str")
+```
+
+When `1787569` appears in the body, the specific template engine is identified and reported in the finding. If no math result is found but a template-engine exception trace appears, the module reports a probable SSTI at `high` severity.
+
+### Error-Based Detection
+
+The following exception class signatures are matched (case-insensitive) in the response body for secondary detection:
+
+```
+TemplateSyntaxError    jinja2.exceptions     UndefinedError
+Twig_Error_Syntax      freemarker.core.      TemplateError
+org.thymeleaf.exceptions                     smarty: syntax error
+```
+
+---
+
+## XXE — XML External Entity Injection
+
+The XXE module builds a list of XML-accepting endpoint candidates by combining:
+- API endpoints discovered by the spider
+- Form `action` URLs from `SCAN_DATA["spider"]["sample_forms"]`
+- Directory hits from fuzzing
+- Well-known XML paths: `/xmlrpc.php`, `/soap`, `/api/xml`, `/ws`, `/service.asmx`, `/api/v1/xml`
+- Derived suffixes appended to every discovered base path: `/api`, `/xml`, `/import`, `/parse`, `/upload`, `/ws`, `/soap`
+
+Up to 80 candidates are probed. A quick `POST <x/>` probe with `Content-Type: application/xml` filters out endpoints returning 404/405/415/501 before the heavier XXE payloads are sent.
+
+### XXE Payloads
+
+```xml title="file:///etc/passwd (oracle: root:x:0:0:)"
+<?xml version="1.0"?>
+<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+<root><name>&xxe;</name><data>&xxe;</data>...</root>
+```
+
+```xml title="Hostname disclosure"
+<?xml version="1.0"?>
+<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/hostname">]>
+<root><name>&xxe;</name>...</root>
+```
+
+```xml title="SSRF via AWS metadata"
+<?xml version="1.0"?>
+<!DOCTYPE foo [<!ENTITY xxe SYSTEM "http://169.254.169.254/latest/meta-data/">]>
+<root><name>&xxe;</name>...</root>
+```
+
+The entity is injected into multiple common field names simultaneously (`name`, `data`, `value`, `message`, `text`, `comment`, `title`, `content`, `email`, `subject`) to maximise the chance that the backend reflects the resolved entity in its response. Field names discovered in actual forms are prepended to this default list.
+
+---
+
+## CRLF Injection
+
+CRLF injection tests attempt to insert `Set-Cookie` or custom headers into the HTTP response by embedding carriage-return/line-feed sequences in the URL path and in common redirect parameters. Responses are fetched with `allow_redirects=False` so the injected headers can be inspected before the client follows any redirect.
+
+### Payloads
+
+```python title="CRLF_PAYLOADS"
+"%0d%0aSet-Cookie%3Acrlf_test%3Dinjected"
+"%0aSet-Cookie%3Acrlf_test%3Dinjected"
+"%0d%0aX-CRLF-Test%3A injected"
+"/%0d%0aSet-Cookie%3Acrlf_test%3Dinjected"
+"%E5%98%8D%E5%98%8ASet-Cookie%3Acrlf_test%3Dinjected"   # Unicode double-encode bypass
+```
+
+### Vectors
+
+1. **Path injection** — payload appended to the base URL as a path segment: `https://target.com/<payload>`
+2. **Redirect parameter injection** — payload appended to the value of `url`, `redirect`, `next`, `return`, and `r` GET parameters
+
+A finding is raised when the response headers contain `crlf_test` (the injected cookie/header name), confirming that the server split the response on the injected newline.
+
+---
+
+## HTTP Request Smuggling
+
+The smuggling module uses a two-tier approach:
+
+<Steps>
+  <Step title="smuggler.py Integration">
+    If `smuggler` or `smuggler.py` is found in `PATH` or at `~/smuggler/smuggler.py`, the module delegates to it:
+
+    ```bash
+    python3 smuggler.py -u https://target.com -t 10 -q
+    ```
+
+    The combined stdout/stderr is scanned for keywords `vulnerable`, `smuggl`, `clte`, `tecl`, `found`. A positive match raises a critical finding.
+  </Step>
+  <Step title="Manual CL.TE Raw Socket Test">
+    When smuggler is unavailable, a manual CL.TE probe is sent via a raw socket (with optional TLS wrapping):
+
+    ```http title="CL.TE probe"
+    POST / HTTP/1.1
+    Host: target.com
+    Content-Type: application/x-www-form-urlencoded
+    Content-Length: 6
+    Transfer-Encoding: chunked
+
+    0
+
+    G
+    ```
+
+    A `400 Bad Request` with "bad request" or "invalid" in the body indicates the server detected the conflicting headers — a potential smuggling surface that warrants manual follow-up with smuggler.py.
+  </Step>
+  <Step title="Install Guidance">
+    If smuggler is missing, the module prints installation instructions:
+
+    ```bash
+    git clone https://github.com/defparam/smuggler
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Cache Poisoning
+
+The cache poisoning module injects non-standard headers with a unique random canary value, then re-fetches the URL without the header to check whether the canary persists in the cached response.
+
+### Injected Headers
+
+```python title="CACHE_POISON_HEADERS"
+("X-Forwarded-Host",   "evil-canary-{rand}.com")
+("X-Host",             "evil-canary-{rand}.com")
+("X-Forwarded-Scheme", "http")
+("X-Original-URL",     "/admin-canary-{rand}")
+("X-Rewrite-URL",      "/admin-canary-{rand}")
+("X-Forwarded-Server", "evil-canary-{rand}.com")
+("Forwarded",          "host=evil-canary-{rand}.com")
+```
+
+`{rand}` is replaced with an 8-character random alphanumeric string unique to each scan session.
+
+### Verdict Logic
+
+| Condition | Severity | Label |
+|-----------|----------|-------|
+| Canary reflected in response **with** injected header **and** in follow-up response **without** it | High | Cache Poisoning confirmed |
+| Canary reflected only when header is present | Medium | Cache Poisoning possible (reflected) |
+
+### Cache Detection
+
+After testing all headers, the module sends a plain GET and checks for cache-indicator response headers:
+
+```
+X-Cache          Age          CF-Cache-Status          X-Varnish
+```
+
+If none are present, the module notes that the target may not use a public cache.
+
+---
+
+## Findings Integration
+
+All six modules append structured findings to `FINDINGS` with severity labels (`critical` or `high`) and store detailed result objects in `SCAN_DATA["advanced_security"]` under their respective keys: `ssrf`, `ssti`, `xxe`, `crlf`, `smuggling`, `cache_poisoning`. The HTML dashboard **Pruebas Avanzadas** section renders a summary table and per-module detail tables for every finding.

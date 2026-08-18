@@ -1,0 +1,180 @@
+---
+title: "Installing WSTG-Scan: Python Setup and External Tools"
+sidebarTitle: "Installation"
+description: "Step-by-step guide to install WSTG-Scan, its Python dependencies, and optional external tools like Nmap, ffuf, Hydra, Nuclei, and WPScan."
+---
+
+WSTG-Scan runs on any Python 3.8+ system, but it is best supported on Kali Linux, where most optional tools (`nmap`, `ffuf`, `hydra`, `wpscan`, `seclists`) are available through `apt` without extra configuration. The scanner will automatically detect missing optional tools and offer to install them at runtime — but installing them upfront gives you the broadest attack surface coverage from the very first scan.
+
+## System Requirements
+
+| Requirement | Minimum | Recommended |
+|-------------|---------|-------------|
+| **Python** | 3.8 | 3.10+ |
+| **pip** | Latest | Latest |
+| **RAM** | 512 MB | 2 GB |
+| **Storage** | ~500 MB | ~2 GB (with SecLists wordlists) |
+| **OS** | Debian/Ubuntu | Kali Linux |
+| **Network** | Access to target | Access to target |
+
+<Note>
+  WSTG-Scan is developed and tested primarily on **Kali Linux**. On plain Ubuntu or Debian, SecLists wordlists may not be pre-installed; the scanner will fall back to internal methods or prompt you to install them.
+</Note>
+
+## Install WSTG-Scan
+
+<Steps>
+  <Step title="Clone the repository">
+    Clone the WSTG-Scan source from GitHub into a local directory:
+
+    ```bash
+    git clone https://github.com/afsh4ck/WSTG-Scan.git
+    cd WSTG-Scan
+    ```
+  </Step>
+
+  <Step title="Create a virtual environment">
+    Using a virtual environment keeps WSTG-Scan's Python dependencies isolated from your system Python installation. This prevents version conflicts with other tools on your system.
+
+    ```bash
+    python3 -m venv venv
+    source venv/bin/activate
+    ```
+
+    <Note>
+      You must activate the virtual environment (`source venv/bin/activate`) every time you open a new terminal session before running WSTG-Scan. Your prompt will show `(venv)` when the environment is active. To deactivate it, run `deactivate`.
+    </Note>
+  </Step>
+
+  <Step title="Install Python dependencies">
+    Install the four required Python packages from `requirements.txt`:
+
+    ```bash title="requirements.txt"
+    pip install -r requirements.txt
+    ```
+
+    The file installs:
+
+    | Package | Purpose |
+    |---------|---------|
+    | `requests` | HTTP client for all scan requests |
+    | `beautifulsoup4` | HTML parsing for spidering and form detection |
+    | `colorama` | Cross-platform ANSI colour output |
+    | `tqdm` | Progress bars for spidering, fuzzing, and brute-force |
+  </Step>
+
+  <Step title="Install optional external tools">
+    These tools are not required to run WSTG-Scan, but they unlock the full capability of modules 3–6, 12, and 13. Install them all at once with a single `apt` command:
+
+    ```bash
+    sudo apt update
+    sudo apt install -y nmap ffuf hydra whatweb seclists wpscan
+    ```
+
+    | Tool | Unlocks |
+    |------|---------|
+    | `nmap` | Module 3 — Port scanning with service version detection |
+    | `ffuf` | Modules 5 & 6 — High-speed vhost and directory fuzzing |
+    | `hydra` | Module 12 — Network login brute-force |
+    | `whatweb` | Module 2 — Technology fingerprinting |
+    | `seclists` | All fuzzing modules — Standard wordlists (`raft-small-directories`, `namelist`, `xato-net-10-million-passwords`) |
+    | `wpscan` | Module 13 — WordPress enumeration and CVE detection |
+
+    For Active Directory testing (module 14), also install:
+
+    ```bash
+    sudo apt install -y kerbrute ldap-utils netexec impacket-scripts
+    ```
+  </Step>
+
+  <Step title="Install Nuclei">
+    Nuclei (module 4) is available via `apt` or via the official Go installer. The Go installer gives you the most recent version:
+
+    <Tabs>
+      <Tab title="via apt (simpler)">
+        ```bash
+        sudo apt install -y nuclei
+        nuclei -update-templates
+        ```
+      </Tab>
+      <Tab title="via Go (latest release)">
+        ```bash
+        GO111MODULE=on go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+        nuclei -update-templates
+        ```
+
+        <Tip>
+          After installing via Go, make sure `~/go/bin` is in your `PATH` so WSTG-Scan can find the `nuclei` binary:
+
+          ```bash
+          echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.bashrc
+          source ~/.bashrc
+          ```
+        </Tip>
+      </Tab>
+    </Tabs>
+
+    <Note>
+      If Nuclei is not found when module 4 runs, WSTG-Scan will automatically offer to install it via `apt`. You can also skip Nuclei entirely and use the other 14 modules without it.
+    </Note>
+  </Step>
+
+  <Step title="Verify the installation">
+    Confirm WSTG-Scan launches correctly by checking the version:
+
+    ```bash
+    python3 wstg-scan.py --version
+    ```
+
+    You should see output similar to:
+
+    ```
+    WSTG-Scan v1.4.2
+    ```
+
+    To do a full smoke-test, launch the interactive menu:
+
+    ```bash
+    python3 wstg-scan.py
+    ```
+
+    The ASCII banner and main menu should appear. If you see a `ModuleNotFoundError`, re-run `pip install -r requirements.txt` inside your activated virtual environment.
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+<Accordion title="ModuleNotFoundError: No module named 'requests'">
+  The virtual environment is either not activated or the dependencies were not installed into it. Run:
+
+  ```bash
+  source venv/bin/activate
+  pip install -r requirements.txt
+  ```
+</Accordion>
+
+<Accordion title="ffuf: command not found">
+  Install `ffuf` via `apt`:
+
+  ```bash
+  sudo apt install -y ffuf
+  ```
+
+  WSTG-Scan will fall back to its internal multi-threaded fuzzer automatically if `ffuf` is absent, but `ffuf` is significantly faster for large wordlists.
+</Accordion>
+
+<Accordion title="Nuclei hangs or emits Interactsh errors">
+  The messages `Could not unmarshal interaction data` are background noise from the Nuclei Interactsh OOB backend. WSTG-Scan filters these automatically. If you want to disable Interactsh entirely, add `-ni` to the Nuclei invocation in `wstg-scan.py`.
+</Accordion>
+
+<Accordion title="Spidering stops after very few pages">
+  If you see `Exceeded N redirects`, the target has long redirect chains. Open `wstg-scan.py` and increase `MAX_REDIRECTS` from its default of `10`:
+
+  ```python
+  MAX_REDIRECTS = 20
+  ```
+</Accordion>
+
+## Next Steps
+
+With WSTG-Scan installed, head to the [Quickstart](/quickstart) guide to run your first scan.

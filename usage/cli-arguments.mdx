@@ -1,0 +1,222 @@
+---
+title: "WSTG-Scan CLI Arguments: Full Flag Reference Guide"
+sidebarTitle: "CLI Arguments"
+description: "Full reference for every WSTG-Scan command-line flag — targets, output, threading, TLS, delay, and evasion options with real examples."
+---
+
+WSTG-Scan accepts command-line arguments for non-interactive and automated workflows. When no arguments are provided the tool falls back to its interactive prompts, but specifying flags on the command line lets you integrate WSTG-Scan into CI pipelines, shell scripts, or timed jobs without any manual input. All flags are optional except that `--batch` requires at least one target source (`--url` or `--list`).
+
+## Target Selection
+
+<ParamField path="--url" type="string" required={false}>
+  **`--url URL` / `-u URL`** — Target URL to scan. The flag is repeatable and each value can itself be a comma-separated list of URLs.
+
+  ```bash
+  # Single target
+  python3 wstg-scan.py -u https://example.com
+
+  # Two targets via repetition
+  python3 wstg-scan.py -u https://a.example.com -u https://b.example.com
+
+  # Three targets in one value (comma-separated)
+  python3 wstg-scan.py -u https://a.example.com,https://b.example.com,https://c.example.com
+
+  # Mixed: comma-list + separate flag
+  python3 wstg-scan.py -u https://a.example.com,https://b.example.com -u https://c.example.com
+  ```
+
+  Omit to enter interactive mode, where the tool prompts you for a single URL or a list.
+</ParamField>
+
+<ParamField path="--list" type="string" required={false}>
+  **`--list FILE` / `-L FILE`** — Path to a plain-text file containing one URL per line. Lines beginning with `#` are treated as comments and skipped. Blank lines are also ignored. The flag is repeatable, so you can supply multiple list files in one invocation.
+
+  ```bash
+  python3 wstg-scan.py -L targets.txt
+  python3 wstg-scan.py -L internal.txt -L external.txt
+  ```
+
+  <Tip>
+    You can combine `--url` and `--list` freely. All URLs from both sources are merged and deduplicated (preserving original order) before scanning begins.
+  </Tip>
+
+  Example `targets.txt` file format:
+
+  ```text title="targets.txt"
+  # Production targets
+  https://app.example.com
+  https://api.example.com
+
+  # Staging environment
+  https://staging.example.com
+  ```
+</ParamField>
+
+## Scan Mode
+
+<ParamField path="--batch" type="boolean" required={false}>
+  **`--batch`** — Run a fully non-interactive full pentest against every target and save one report per target automatically. Requires at least one target specified via `--url` or `--list`. No prompts are shown during the scan. At the end a global batch summary table is printed.
+
+  ```bash
+  python3 wstg-scan.py -L targets.txt --batch
+  python3 wstg-scan.py -u https://a.example.com -u https://b.example.com --batch
+  ```
+
+  <Note>
+    In batch mode the **Active Directory** module (option 14) is skipped because it requires interactive prompts for domain and credential configuration. All other 13 scan modules run in full.
+  </Note>
+</ParamField>
+
+## Output
+
+<ParamField path="--output" type="string" required={false}>
+  **`--output FILE` / `-o FILE`** — Base path for the report files. WSTG-Scan generates four formats from this base path: `.txt` (plain text summary), `.json` (full serialized data), `.html` (interactive SaaS-style dashboard), and `.md` (Markdown). When this flag is omitted the tool prompts you at the end of the session whether to save.
+
+  ```bash
+  python3 wstg-scan.py -u https://example.com -o /tmp/reports/example
+  # Produces: /tmp/reports/example.txt  /tmp/reports/example.json
+  #           /tmp/reports/example.html /tmp/reports/example.md
+  ```
+
+  <Note>
+    In multi-target interactive mode and batch mode, reports are always saved to `reports/<host>/<host>.{txt,json,html,md}` regardless of `--output`, so that each target gets its own directory.
+  </Note>
+</ParamField>
+
+## Performance and Concurrency
+
+<ParamField path="--threads" type="integer" required={false}>
+  **`--threads N` / `-t N`** — Number of concurrent threads used by fuzzing and enumeration modules. Defaults to `5`. Increasing this value speeds up directory fuzzing, vhost fuzzing, injection tests, and API discovery, but puts more load on both the target and your machine.
+
+  ```bash
+  python3 wstg-scan.py -u https://example.com --threads 10
+  python3 wstg-scan.py -u https://example.com -t 20
+  ```
+</ParamField>
+
+<ParamField path="--timeout" type="integer" required={false}>
+  **`--timeout S`** — Per-request timeout in seconds. Defaults to `10`. Raise this value when scanning slow targets (e.g., through a VPN or on congested networks) to avoid false negatives from timed-out probes.
+
+  ```bash
+  python3 wstg-scan.py -u https://slow.example.com --timeout 30
+  ```
+</ParamField>
+
+<ParamField path="--delay" type="float" required={false}>
+  **`--delay S` / `-d S`** — Delay in seconds applied **between every single request** across the entire session (not just between modules). Defaults to `0.0`. Use this for stealth and evasion — slowing the request rate helps bypass simple rate-limiting controls and reduces the chance of triggering WAF alerts.
+
+  ```bash
+  # Half-second delay between all requests
+  python3 wstg-scan.py -u https://example.com --delay 0.5
+
+  # Two-second delay for cautious scanning
+  python3 wstg-scan.py -u https://example.com -d 2.0
+  ```
+
+  <Warning>
+    A non-zero delay significantly increases total scan time. For a full pentest with thousands of requests, even a 0.5-second delay can add hours to the run.
+  </Warning>
+</ParamField>
+
+## TLS and Display
+
+<ParamField path="--insecure" type="boolean" required={false}>
+  **`--insecure` / `-k`** — Disable TLS certificate verification. Use this when testing lab environments, CTF machines, or internal applications that use self-signed certificates. A warning is printed at startup when this flag is active.
+
+  ```bash
+  python3 wstg-scan.py -u https://10.10.10.100 --insecure
+  python3 wstg-scan.py -u https://lab.internal -k
+  ```
+
+  <Warning>
+    Never use `--insecure` against production targets. Disabling certificate verification exposes the scanner itself to man-in-the-middle attacks during the scan.
+  </Warning>
+</ParamField>
+
+<ParamField path="--no-color" type="boolean" required={false}>
+  **`--no-color`** — Disable all ANSI color codes in the terminal output. Useful when piping output to a file, running inside a CI/CD system that does not support color, or when using a terminal that renders escape codes as literal characters.
+
+  ```bash
+  python3 wstg-scan.py -u https://example.com --no-color | tee scan.log
+  ```
+</ParamField>
+
+<ParamField path="--version" type="boolean" required={false}>
+  **`--version` / `-V`** — Print the WSTG-Scan version string and exit immediately. No scan is performed.
+
+  ```bash
+  python3 wstg-scan.py --version
+  # Output: WSTG Scanner v1.4.2
+  ```
+</ParamField>
+
+---
+
+## Example Command Combinations
+
+The following examples demonstrate the most common real-world usage patterns.
+
+<Tabs>
+  <Tab title="Interactive Single Target">
+    Start the interactive menu with a specific target URL pre-loaded, saving the report to a custom path:
+
+    ```bash
+    python3 wstg-scan.py \
+      -u https://app.example.com \
+      -o ~/pentest/example_report
+    ```
+  </Tab>
+
+  <Tab title="Batch Full Pentest">
+    Run a fully automated pentest against a list of targets, using 10 threads and a 15-second timeout, saving one report per target:
+
+    ```bash
+    python3 wstg-scan.py \
+      -L targets.txt \
+      --batch \
+      --threads 10 \
+      --timeout 15
+    ```
+  </Tab>
+
+  <Tab title="Stealth / Evasion">
+    Slow scan with a 1-second delay between requests, TLS verification disabled for a lab, and colors off for clean log output:
+
+    ```bash
+    python3 wstg-scan.py \
+      -u https://192.168.1.100 \
+      --insecure \
+      --delay 1.0 \
+      --threads 2 \
+      --no-color \
+      -o /tmp/lab_report
+    ```
+  </Tab>
+
+  <Tab title="Multiple Sources">
+    Combine comma-separated URLs, a repeated `-u` flag, and a target file — all sources are deduplicated automatically:
+
+    ```bash
+    python3 wstg-scan.py \
+      -u https://web1.example.com,https://web2.example.com \
+      -u https://api.example.com \
+      -L extra_targets.txt \
+      --threads 8 \
+      --timeout 20 \
+      --batch
+    ```
+  </Tab>
+
+  <Tab title="Burp Suite Proxy">
+    Route all traffic through Burp Suite for inspection by setting the standard proxy environment variables before running:
+
+    ```bash
+    export HTTP_PROXY=http://127.0.0.1:8080
+    export HTTPS_PROXY=http://127.0.0.1:8080
+
+    python3 wstg-scan.py \
+      -u https://example.com \
+      --insecure
+    ```
+  </Tab>
+</Tabs>

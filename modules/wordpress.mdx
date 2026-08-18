@@ -1,0 +1,132 @@
+---
+title: "WordPress Security Testing with WPScan Integration"
+sidebarTitle: "WordPress"
+description: "Automated WordPress detection, WPScan enumeration of users, plugins, themes, and CVEs, plus login brute force with structured summary output."
+---
+
+Menu option 13 runs a dedicated WordPress assessment. WSTG-Scan first determines whether the target is a WordPress installation, then invokes WPScan for deep enumeration and optionally brute-forces the login. Results are parsed from WPScan's JSON output and presented as a structured summary alongside the raw CLI output. All findings integrate into the global report.
+
+---
+
+## WordPress Auto-Detection
+
+WordPress detection runs automatically as part of the full pentest (option 15) using results from the WhatWeb fingerprinting step combined with a set of manual HTTP checks. Detection is triggered when any of the following signals are observed:
+
+<CardGroup cols={2}>
+  <Card title="WhatWeb CMS match" icon="search">
+    WhatWeb reports `WordPress` as the detected CMS in its plugin output.
+  </Card>
+  <Card title="wp-content or wp-includes" icon="folder">
+    The HTTP response body contains paths like `/wp-content/` or `/wp-includes/`, which are exclusive to WordPress installations.
+  </Card>
+  <Card title="wp-json API" icon="brackets-curly">
+    A `200 OK` response at `/wp-json` or `/wp-json/wp/v2/` confirms the WordPress REST API is active.
+  </Card>
+  <Card title="wp-login.php or xmlrpc.php" icon="key">
+    The login page or XML-RPC endpoint responds with a recognisable WordPress page, confirming the core installation.
+  </Card>
+  <Card title="Generator meta tag" icon="code">
+    `<meta name="generator" content="WordPress x.y.z">` in the HTML source reveals the WordPress version directly.
+  </Card>
+  <Card title="Common assets" icon="file">
+    Presence of `/wp-admin/`, default theme CSS paths, or `wp-embed.min.js` in page source confirms WordPress.
+  </Card>
+</CardGroup>
+
+When WordPress is detected during the full pentest, the module is automatically queued. Running option 13 directly also triggers these checks on the current target before invoking WPScan.
+
+---
+
+## WPScan Integration
+
+WPScan is invoked in two passes: first with `--format cli` so its native coloured output streams to the terminal in real time, then with `--format json` to generate a machine-readable summary. Both passes use the same enumeration flags.
+
+<Note>
+  WPScan requires a free API token from [wpscan.com](https://wpscan.com) to retrieve CVE data for plugins, themes, and WordPress core. Without a token, vulnerability counts will be zero. Set your token by entering it at the prompt or by configuring the `WPSCAN_API_TOKEN` environment variable before running the scanner.
+</Note>
+
+### Enumeration Flags
+
+The default enumeration command uses `--enumerate u,ap,at`:
+
+```bash title="WPScan enumeration command"
+wpscan --url https://target.com \
+  --enumerate u,ap,at \
+  --request-timeout 15 \
+  -t 5 \
+  --format cli
+```
+
+| Flag | Scope |
+|------|-------|
+| `u` | User enumeration (REST API, author pages, login error differentials) |
+| `ap` | All plugins (aggressive mode — checks every known plugin slug) |
+| `at` | All themes (aggressive mode — checks every known theme slug) |
+
+A retry pass is automatically triggered with `--disable-tls-checks --random-user-agent --follow-redirection` if WPScan exits with return code 4 (connectivity or TLS error).
+
+### User Enumeration
+
+WPScan enumerates WordPress users through multiple techniques:
+
+- **REST API** — `/wp-json/wp/v2/users` returns user objects including `slug` and `name`
+- **Author archive pages** — `/?author=1`, `/?author=2`, etc., redirecting to `/author/<slug>/`
+- **Login error differential** — the login form at `/wp-login.php` returns different error messages for invalid usernames versus valid usernames with wrong passwords
+
+### Plugin and Theme Detection
+
+WPScan checks installed plugins and themes against its vulnerability database. For each component the summary includes:
+
+- Component name and detected version
+- Latest available version
+- Detection confidence percentage
+- Known CVE count (requires API token)
+- Installation location URL
+
+### Login Brute Force
+
+After enumeration, the module offers to run a password attack against the discovered users:
+
+```bash title="WPScan brute force command"
+wpscan --url https://target.com \
+  --password-attack xmlrpc \
+  -t 20 \
+  -U /tmp/wp_users.txt \
+  -P /usr/share/seclists/Passwords/xato-net-10-million-passwords-10000.txt
+```
+
+The `xmlrpc` attack mode uses the XML-RPC multicall method (`system.multicall`) to test multiple credentials per HTTP request, making it significantly faster than the standard login form attack. The `wp-login` mode is also available.
+
+---
+
+## Summary Output
+
+After enumeration and (optionally) brute force complete, WSTG-Scan prints a structured summary table:
+
+| Field | Content |
+|-------|---------|
+| WordPress version | Detected version number and its release status |
+| Main theme | Active theme name, version, and detected vulnerabilities |
+| Plugins found | Count of all detected plugins |
+| Plugin vulnerabilities | Total CVE count across all plugins |
+| Users found | Usernames, display names, and detection method |
+| Interesting findings | Exposed files, debug mode, user registration status |
+| Credentials | Username/password pairs found by brute force |
+
+All data is stored in `SCAN_DATA["wordpress"]` and the dedicated **WordPress** section of the HTML dashboard, which includes separate tables for plugins, themes, users, and vulnerabilities.
+
+---
+
+## WPScan Installation
+
+If WPScan is not found in `PATH`, the scanner offers to install it automatically:
+
+```bash title="Auto-install via gem"
+sudo gem install wpscan
+```
+
+On Windows or non-Debian systems, the scanner prints manual installation instructions. WPScan can also be installed on Kali Linux via `apt`:
+
+```bash
+sudo apt install -y wpscan
+```

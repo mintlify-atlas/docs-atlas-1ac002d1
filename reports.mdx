@@ -1,0 +1,300 @@
+---
+title: "WSTG-Scan Report Formats and Interactive Dashboard"
+sidebarTitle: "Reports"
+description: "Four report formats saved per target: TXT, JSON, HTML dashboard, and Markdown. HTML includes live search, dark mode, KPI cards, and PDF export."
+---
+
+After every scan session WSTG-Scan writes four report files automatically. Each file shares the same base name and lives under a `reports/<host>/` subdirectory created next to the script, so results from different targets are always kept separate and never overwrite each other. Reports capture every category of data collected during the session: general reconnaissance, port scan results, Nuclei findings, vhost and directory enumeration, spidering, source code analysis, API testing, Active Directory data, credentials, and the full FINDINGS list.
+
+## Report Storage
+
+Reports are saved to `reports/<host>/<host>.{txt,json,html,md}` relative to the current working directory. The host component is derived from the target URL, with non-alphanumeric characters replaced by underscores so the path is always filesystem-safe.
+
+```
+reports/
+└── example_com/
+    ├── example_com.txt
+    ├── example_com.json
+    ├── example_com.html
+    └── example_com.md
+```
+
+Use `--output` (or `-o`) to override the base path. All four formats are still written; only the directory and file prefix change.
+
+```bash
+python3 wstg-scan.py --url https://example.com --output /tmp/pentest/example
+# writes /tmp/pentest/example.txt, .json, .html, .md
+```
+
+---
+
+## Report Formats
+
+WSTG-Scan generates four complementary formats from the same in-memory scan data.
+
+<CardGroup cols={2}>
+  <Card title="TXT" icon="file-lines">
+    Plain-text summary suitable for quick reading, grep, or pasting into notes. Sections: General Info, Nmap + NSE, WordPress, Spidering, API Endpoints, VHosts, Directories, Credentials, Source Code Analysis, Active Directory, Advanced Security Tests, Findings, and Nuclei.
+  </Card>
+  <Card title="JSON" icon="code">
+    Fully serialized scan data, including all `SCAN_DATA` keys and `FINDINGS`. Ideal for downstream tooling, CI/CD pipelines, SIEM ingestion, or scripted analysis.
+  </Card>
+  <Card title="HTML" icon="browser">
+    A self-contained interactive SaaS dashboard. Light/dark theme, collapsible sidebar, live table search, KPI cards, risk severity gauge, and PDF export. All sections are present only when data exists.
+  </Card>
+  <Card title="Markdown" icon="markdown">
+    Standard Markdown formatted for immediate import into GitBook, GitHub, or Obsidian. Includes tables, section headings, and an executive summary.
+  </Card>
+</CardGroup>
+
+### TXT Report
+
+The plain text report is structured with labeled blocks and is human-readable without any tooling. Each section is guarded—if a module was not executed, the block reads `No ejecutado` rather than being omitted entirely.
+
+```
+WSTG Scanner v1.4.2 - Reporte de Escaneo
+Objetivo : https://example.com
+Fecha    : 2025-01-15 14:30:00
+Modo auth: No
+============================================================
+
+[RESUMEN]
+- total_findings: 12
+- total_open_ports: 4
+- total_nuclei_findings: 7
+...
+
+[INFORMACIÓN GENERAL]
+- Status: 200
+- Servidor: nginx/1.25.3
+- Tecnologías: WordPress 6.4, PHP 8.2
+...
+
+[ESCANEO DE PUERTOS (NMAP)]
+- 22/tcp [open] ssh — OpenSSH 8.9p1
+- 80/tcp [open] http — nginx 1.25.3
+- 443/tcp [open] https — nginx 1.25.3
+...
+
+[HALLAZGOS]
+[PORT] 443/tcp open https
+[VULN] XSS reflejado en /search?q=
+...
+
+[NUCLEI] Resumen de vulnerabilidades:
+- HIGH: 2 hallazgos (cve-2023-..., ssl-weak-cipher)
+- MEDIUM: 5 hallazgos (...)
+```
+
+### JSON Report
+
+The JSON report contains the full `report_data` dictionary, including a `stats` object with numeric counters for every module, the complete `scan_data` tree, and the `findings` list. This format is ideal for automated processing.
+
+```json title="example_com.json (excerpt)"
+{
+  "tool": "1.4.2",
+  "target": "https://example.com",
+  "date": "2025-01-15 14:30:00",
+  "findings": [
+    "[PORT] 443/tcp open https",
+    "[VULN] XSS reflejado en /search?q="
+  ],
+  "scan_data": {
+    "stats": {
+      "total_findings": 12,
+      "total_open_ports": 4,
+      "total_nuclei_findings": 7,
+      "total_dir_hits": 23,
+      "total_vhosts": 2,
+      "source_code_pages_analyzed": 18,
+      "total_source_code_findings": 5
+    },
+    "nmap": { "ports": [...], "nse_results": [...] },
+    "nuclei_findings": [...],
+    "api_endpoints": [...],
+    "vhosts": [...],
+    "directory_hits": [...],
+    "source_code_analysis": { "findings": [...] },
+    "active_directory": {...},
+    "bruteforce_credentials": [...]
+  }
+}
+```
+
+<Tip>
+  The JSON report is the ideal integration point for CI/CD pipelines. Parse `scan_data.stats.total_findings` or `scan_data.nuclei_findings` in your pipeline script and fail the build when critical findings are present. Because every module writes to the same `scan_data` tree, a single `jq` expression covers the entire scan surface.
+</Tip>
+
+### HTML Dashboard
+
+The HTML report is a fully self-contained single-file interactive dashboard that requires no server or external dependencies at viewing time. It bundles all styles, scripts, and data inline.
+
+#### Theme and Layout
+
+The dashboard automatically detects the OS color scheme preference (`prefers-color-scheme`) and applies light or dark mode accordingly. A toggle button in the top bar persists the user's preference. The sidebar can be collapsed to icon-only mode to maximize reading space.
+
+<Tabs>
+  <Tab title="Light Mode Colors">
+    ```
+    Background   #f4f6fb
+    Surface      #ffffff
+    Text         #0f172a
+    Accent       #2563eb
+    Critical     #d33a34
+    High         #d9772b
+    Medium       #caa11a
+    Low          #2563eb
+    ```
+  </Tab>
+  <Tab title="Dark Mode Colors">
+    ```
+    Background   #070a10
+    Surface      #0f141d
+    Text         #d6dde7
+    Accent       #4d9bff
+    Critical     #ff6b6b
+    High         #ff9d57
+    Medium       #ffd24a
+    Low          #5b9dff
+    ```
+  </Tab>
+</Tabs>
+
+#### KPI Summary Cards
+
+The top of the dashboard shows KPI metric cards for every module that returned data. Each card is clickable and navigates directly to the corresponding section. Cards use color coding to highlight risk: red for high/critical counts, amber for medium, blue for informational.
+
+Metrics shown (when data is present): Findings, Ports, NSE results, Nuclei findings, Technologies detected, API Endpoints, Directories, Users, Credentials, AD Users, AS-REP hashes, Kerberoast hashes, and Advanced Security findings.
+
+#### Risk Severity Gauge
+
+The hero section displays an animated donut chart built from the combined Nuclei and source-code-analysis severity counts. The gauge shows Critical, High, Medium, Low, and Info slices proportionally. The center label reports the overall risk level (`CRITICO`, `ALTO`, `MEDIO`, `BAJO`, or `LIMPIO`) with a numeric risk score calculated as:
+
+```
+score = (critical × 10) + (high × 5) + (medium × 2) + low
+```
+
+#### Live Table Search
+
+A search input in the top bar filters every visible table row across all sections simultaneously. It matches against any column value — host, port, CVE ID, hash, URL, template name, or any other field. The filter is applied in real time as you type.
+
+#### Sidebar Navigation
+
+The collapsible left sidebar lists every section with a count badge. The active section is highlighted automatically as you scroll. On mobile the sidebar becomes a full-screen drawer toggled by a floating menu button.
+
+#### HTML Dashboard Sections
+
+All sections are conditionally rendered — a section is only included when the corresponding module produced data.
+
+<Accordion title="Resumen (Summary)">
+  KPI cards linked to each section, the risk severity donut gauge, and an objective overview table with scan metadata (target URL, date, tool version, HTTP status, server).
+</Accordion>
+
+<Accordion title="Información General (General Info)">
+  WhatWeb / technology fingerprint table with technology name, detail, and source. HTTP response headers table, detected cookies, and correlated user/email pairs from enumeration.
+</Accordion>
+
+<Accordion title="Nmap y NSE">
+  Open ports table with port/protocol, state, service name, and version string assembled from `product + version + extrainfo`. Separate NSE results panel with script ID, output snippet, and interesting/info classification. Both panels show the exact Nmap command that was run.
+</Accordion>
+
+<Accordion title="Hallazgos (Findings)">
+  All entries from the global `FINDINGS` list, grouped by category prefix (`[PORT]`, `[VULN]`, `[CODE:HIGH]`, `[API]`, etc.). Each group shows the category, total count, and full detail.
+</Accordion>
+
+<Accordion title="Nuclei">
+  Severity summary table (Critical / High / Medium / Low / Info) and a detailed findings table with severity badge, template ID, finding name, matched URL, and tags. Rows are color-coded and filterable by severity using the filter bar.
+</Accordion>
+
+<Accordion title="API">
+  Discovered API endpoints with HTTP status badge, endpoint path, full URL, and content-type. Includes Swagger/OpenAPI documentation exposure findings.
+</Accordion>
+
+<Accordion title="VHosts">
+  Virtual hosts discovered by ffuf subdomain fuzzing, with HTTP status, FQDN, and response size.
+</Accordion>
+
+<Accordion title="Directorios (Directories)">
+  Directory fuzzing hits with HTTP status, URL, and response size. Authenticated redirect resolution results appear here with `302→200` status notation and `NOTA` column annotations.
+</Accordion>
+
+<Accordion title="Superficie Expuesta (Exposed Surface)">
+  Paths found in `robots.txt` and `sitemap.xml`, allowed HTTP methods from the OPTIONS probe, GET parameters tested for injection, and a table of form inputs tested with their action URL and method.
+</Accordion>
+
+<Accordion title="Pruebas Avanzadas (Advanced Security)">
+  Summary table with hit counts per module (SSRF, SSTI, XXE, CRLF, HTTP Smuggling, Cache Poisoning), followed by individual detail panels for each module when findings exist.
+</Accordion>
+
+<Accordion title="WordPress">
+  WPScan summary (core version, theme, plugin count, user count, vulnerability count, credentials). Separate panels for users, vulnerabilities with CVE/component/fix version, and bruteforced credentials.
+</Accordion>
+
+<Accordion title="Spidering">
+  Crawl metrics (total URLs, parameters, forms), sample parameter chips, and the full discovered URL table.
+</Accordion>
+
+<Accordion title="Código Fuente (Source Code)">
+  Pages and JS/JSON assets analyzed, finding counts by severity, and a detail table with severity badge, secret type, matched value, source URL, and surrounding context snippet (±30 characters).
+</Accordion>
+
+<Accordion title="Active Directory">
+  DC target, domain, Base DN, and auth mode. Separate panels for Kerbrute valid users, LDAP users (with UPN, CN, group memberships), LDAP groups, LDAP computers (with OS/version), AS-REP roastable hashes, Kerberoast hashes, and NetExec credentials. Raw command outputs shown in collapsible `<details>` blocks.
+</Accordion>
+
+<Accordion title="Credenciales Web (Web Credentials)">
+  Username/password pairs discovered by Hydra or the internal CSRF-aware bruteforcer.
+</Accordion>
+
+<Accordion title="Datos Completos (Full JSON Dump)">
+  Pretty-printed `scan_data` statistics object and the complete JSON dump of all scan data, scrollable inside a code block. Useful for quick inspection without opening the `.json` file.
+</Accordion>
+
+#### PDF Export
+
+Clicking the **PDF** button in the top bar triggers `window.print()`. The dashboard applies a dedicated `@media print` stylesheet that forces a light palette, hides the sidebar and navigation controls, removes backgrounds, and adds page-break rules to avoid rows or panels being cut across pages.
+
+---
+
+## In-Session Review (Options 16 and 17)
+
+Options **16** and **17** appear in the menu only after at least one scan module has run, indicated in the menu with a note `(tras escanear aparecen)`.
+
+<CardGroup cols={2}>
+  <Card title="Option 16 — Show Markdown" icon="markdown">
+    Prints the complete Markdown report to the terminal. Ready to copy and paste directly into GitBook, a GitHub issue, or an Obsidian note without saving to disk first.
+  </Card>
+  <Card title="Option 17 — Show Result Tables" icon="table">
+    Reprints all visual box-drawing tables (findings, ports, directories, Nuclei, API endpoints, credentials, etc.) in the terminal, color-coded by severity and status. Useful for reviewing results without re-running any module.
+  </Card>
+</CardGroup>
+
+### Markdown Format
+
+The Markdown report includes an executive summary table, security headers checklist, detected cookies, HTTP methods, Nmap port table, Nuclei findings table, injection test results, spidering statistics, API endpoints, VHosts, directory hits, source code analysis, Active Directory, credentials, and WordPress data.
+
+```markdown title="example_com.md (excerpt)"
+# OWASP WSTG Scanner — Reporte de Pentesting
+
+- **Objetivo:** `https://example.com`
+- **Fecha:** 2025-01-15 14:30:00
+- **Herramienta:** WSTG Scanner v1.4.2
+
+## Resumen ejecutivo
+
+| Campo | Valor |
+|---|---|
+| Status HTTP | 200 |
+| Servidor | nginx/1.25.3 |
+| Hallazgos (FINDINGS) | 12 |
+| Vulnerabilidades Nuclei | 7 |
+| Credenciales válidas | 2 |
+
+## Cabeceras de seguridad
+
+| Header | Estado | Valor |
+|---|---|---|
+| Strict-Transport-Security | OK | max-age=31536000 |
+| Content-Security-Policy | AUSENTE | - |
+...
+```

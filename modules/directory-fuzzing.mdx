@@ -1,0 +1,186 @@
+---
+title: "Directory and Virtual Host Fuzzing via ffuf Baseline"
+sidebarTitle: "Dir Fuzzing"
+description: "Menu options 5 and 6 use ffuf with Content-Length baseline filtering and auto-calibration to find virtual hosts and hidden directories accurately."
+---
+
+WSTG-Scan provides two complementary fuzzing capabilities under menu options **5** (VHost fuzzing) and **6** (directory fuzzing). Both modules use [ffuf](https://github.com/ffuf/ffuf) as the primary engine when available, with an internal multithreaded fallback when it is not. Baseline content-length filtering, wordlist pre-processing, and authenticated redirect resolution work together to keep false positive rates low even against wildcard applications.
+
+## Option 5 — VHost Fuzzing
+
+Virtual host fuzzing discovers additional hostnames served by the same IP address by cycling the `Host` header through a wordlist. This technique uncovers staging environments, internal admin panels, and developer subdomains that do not appear in DNS.
+
+### How the Baseline Works
+
+Before launching ffuf, WSTG-Scan sends a single request with a deliberately invalid `Host` header to learn the server's "not found" response size:
+
+```text
+GET / HTTP/1.1
+Host: defnotvalid94721.example.com
+```
+
+The response `Content-Length` (or actual body length if the header is absent) is stored as `baseline_size`. ffuf is then told to filter out any response that matches this size with `-fs <baseline_size>`, so wildcard catch-all responses are silently discarded.
+
+### Domain Detection
+
+WSTG-Scan auto-detects whether the target is a fully qualified domain name or a bare IP address:
+
+- **FQDN target** (e.g. `https://example.com`): the base domain is suggested automatically and you can accept or override it.
+- **IP target** (e.g. `https://10.10.11.45`): a base domain is required for `Host: FUZZ.<domain>` to make sense, so you are prompted to provide one (e.g. `planning.htb`).
+
+### ffuf VHost Command
+
+```bash title="ffuf VHost Command (constructed automatically)"
+ffuf \
+  -w /usr/share/seclists/Discovery/DNS/namelist.txt:FUZZ \
+  -u https://example.com/ \
+  -H "Host: FUZZ.example.com" \
+  -t 50 \
+  -timeout 5 \
+  -o /tmp/vhost_results.json -of json \
+  -fs 1248
+```
+
+<Note>
+  The default wordlist is SecLists' `Discovery/DNS/namelist.txt`. You can supply a custom path when prompted. For large wordlists (50 000+ entries), the scanner recommends increasing thread count to reduce runtime.
+</Note>
+
+### VHost Fallback (Internal Multithreaded Method)
+
+If ffuf is not installed, the scanner falls back to an internal Python implementation that performs the same `Host: FUZZ.<domain>` technique using a `ThreadPoolExecutor`. The baseline filtering logic is identical — any response body length that matches the baseline is discarded. This fallback is slower but requires no external tools.
+
+### Interactive Prompts (VHost)
+
+<Tabs>
+  <Tab title="FQDN Target">
+    ```text
+    [?] Dominio base [example.com]:
+    > (press Enter to accept)
+
+    [?] ¿Usar wordlist por defecto (SecLists DNS/namelist.txt)? [S/n]:
+    > S
+
+    [?] ¿Usar ffuf? (recomendado) [S/n]:
+    > S
+
+    [?] Threads [50]:
+    > 100
+
+    [?] Timeout por request en segundos [5]:
+    > 5
+
+    [?] Añadir filtro por File Size detectado (-fs en ffuf)? [S/n]:
+    > S
+    ```
+  </Tab>
+  <Tab title="IP Target">
+    ```text
+    [?] Dominio base (ej: planning.htb) — obligatorio cuando el target es IP:
+    > planning.htb
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Option 6 — Directory Fuzzing
+
+Directory fuzzing enumerates hidden paths, admin panels, backup files, API roots, and other sensitive endpoints by appending wordlist entries to the target URL.
+
+### Wordlist Pre-Filtering
+
+Before passing the wordlist to ffuf, WSTG-Scan creates a cleaned temporary copy. Three types of entries are discarded:
+
+1. **Comments** — lines starting with `#`
+2. **Empty lines** — zero-length after trimming
+3. **Entries with internal whitespace** — invalid as URL path segments
+
+```python title="Wordlist pre-filtering logic (from dir_bruteforce)"
+for line in src:
+    entry = line.strip()
+    if not entry or entry.startswith('#'):
+        continue
+    if any(ch.isspace() for ch in entry):
+        continue
+    dst.write(entry + '\n')
+```
+
+The number of kept entries is reported before scanning begins. The cleaned temporary file is removed automatically after the scan.
+
+### Baseline Filter and Auto-Calibration
+
+WSTG-Scan fetches the target root before launching ffuf to measure its response size. If the root returns HTTP 200, that size is passed to ffuf as `-fs <baseline_size>`, preventing wildcard applications (those that return 200 for any path) from flooding results with false positives.
+
+Auto-calibration (`-ac`) is always enabled, giving ffuf an additional layer of dynamic false-positive filtering.
+
+### ffuf Directory Command
+
+```bash title="ffuf Directory Command (constructed automatically)"
+ffuf \
+  -u https://example.com/FUZZ \
+  -w /tmp/wstg_wl_clean.txt \
+  -t 5 \
+  -fc 404,403 \
+  -ac \
+  -o /tmp/dir_results.json -of json \
+  -fs 3842
+```
+
+<Note>
+  The default wordlist is SecLists' `Discovery/Web-Content/raft-small-directories.txt`. You can provide a custom wordlist when prompted. The medium-density alternative `directory-list-lowercase-2.3-medium.txt` is also available in the SecLists path constant `SECLISTS_MEDIUM`.
+</Note>
+
+### Authenticated Redirect Resolution
+
+When the session is authenticated, a 302 redirect from a discovered path may hide a real 200 response on the redirect target. WSTG-Scan resolves these automatically by following the redirect chain and reporting the final status code instead:
+
+```text
+[302] /dashboard → (resolved) [200] /dashboard   (login redirect resolved)
+```
+
+A **NOTA** column in the results table shows `login redirect` if the 302 destination was a login page, helping you distinguish between redirects that require authentication and those that are permanent moves.
+
+### Internal Fallback
+
+Without ffuf, a multithreaded Python implementation performs the same directory enumeration. It uses the same `COMMON_DIRS` list as a built-in wordlist when no external wordlist is available, covering common targets like `/admin`, `/.git/HEAD`, `/.env`, `/backup.sql`, `/phpinfo.php`, and similar paths.
+
+### Interactive Prompts (Directory Fuzzing)
+
+```text
+[?] ¿Usar wordlist por defecto (raft-small-directories)? [S/n]:
+> S
+
+[?] ¿Usar ffuf para fuzzing? (recomendado) [S/n]:
+> S
+```
+
+### Example Results Table
+
+```text title="Directory Fuzzing Results"
+┌──────────┬────────────────────────────────────────┬────────┬────────┬────────┬──────────────────────┐
+│ STATUS   │ PATH                                   │  SIZE  │  WORDS │    DUR │ NOTA                 │
+├──────────┼────────────────────────────────────────┼────────┼────────┼────────┼──────────────────────┤
+│ [200]    │ admin                                  │ 12,834 │  1,203 │  45ms  │                      │
+│ [200]    │ backup                                 │  4,096 │    312 │  38ms  │                      │
+│ [302]    │ dashboard                              │    512 │     48 │  22ms  │ login redirect       │
+│ [200]    │ api                                    │    892 │     78 │  31ms  │                      │
+└──────────┴────────────────────────────────────────┴────────┴────────┴────────┴──────────────────────┘
+
+  Total: 4 endpoint(s) encontrados
+```
+
+## FINDINGS and Report Integration
+
+Both VHost and directory hits are appended to `FINDINGS` and stored in `SCAN_DATA`:
+
+```text
+[DIR] https://example.com/admin [200]
+[DIR] https://example.com/backup [200]
+[DIR] https://example.com/dashboard [302] (login redirect)
+```
+
+VHost results are stored in `SCAN_DATA["vhosts"]`; directory results in `SCAN_DATA["directory_hits"]`. Both appear in dedicated sections of the HTML dashboard, the plain-text report, and the Markdown report.
+
+<Warning>
+  Fuzzing generates a large number of HTTP requests in a short time. Always confirm you have written authorisation before running these modules. Consider using the `--delay` flag to rate-limit requests against production systems.
+</Warning>

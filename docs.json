@@ -1,72 +1,77 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "WSTG-Scan",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#948c94",
+    "light": "#2c262a",
+    "dark": "#d0cfcf"
   },
-  "favicon": "/favicon.svg",
-  "navigation": {
-    "pages": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
+  "favicon": "https://media.brand.dev/08df6fae-6178-428e-9303-34842c737bd4.png",
   "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "light": "https://media.brand.dev/3718230f-4929-407e-a5ca-128345c39af4.png",
+    "dark": "https://media.brand.dev/3718230f-4929-407e-a5ca-128345c39af4.png"
   },
   "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
     "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
+      "type": "github",
+      "href": "https://github.com/afsh4ck/WSTG-Scan"
     }
-  },
-  "contextual": {
-    "options": [
-      "copy",
-      "view",
-      "chatgpt",
-      "claude",
-      "perplexity",
-      "mcp",
-      "cursor",
-      "vscode"
-    ]
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/afsh4ck/WSTG-Scan"
     }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Usage",
+            "pages": [
+              "usage/cli-arguments",
+              "usage/interactive-menu",
+              "usage/authentication",
+              "usage/multiple-targets"
+            ]
+          },
+          {
+            "group": "Modules",
+            "pages": [
+              "modules/information-gathering",
+              "modules/port-scanning",
+              "modules/vulnerability-analysis",
+              "modules/directory-fuzzing",
+              "modules/spidering",
+              "modules/source-code-analysis",
+              "modules/injection-testing",
+              "modules/advanced-security",
+              "modules/api-testing",
+              "modules/bruteforce",
+              "modules/wordpress",
+              "modules/active-directory"
+            ]
+          },
+          {
+            "group": "Reports & Configuration",
+            "pages": [
+              "reports",
+              "configuration",
+              "troubleshooting"
+            ]
+          }
+        ]
+      }
+    ]
   }
 }
