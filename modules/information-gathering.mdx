@@ -1,31 +1,31 @@
 ---
-title: "Information Gathering: Fingerprinting and Enumeration"
+title: "Information Gathering: Server Fingerprinting and Enumeration"
 sidebarTitle: "Info Gathering"
-description: "Menu option 2 collects server metadata, audits security headers, validates SSL/TLS, enumerates HTTP methods, and probes CORS misconfigurations."
+description: "Menu option 2 collects server metadata, audits HSTS/CSP/X-Frame/cookie flags, validates SSL/TLS, enumerates HTTP methods, and probes CORS issues."
 ---
 
-The Information Gathering module is the foundation of every WSTG-Scan assessment. Selecting option **2** from the main menu triggers a comprehensive enumeration phase that collects server metadata, inspects HTTP response headers, validates SSL/TLS certificate quality, identifies allowed HTTP methods, parses `robots.txt` and `sitemap.xml` for exposed paths, fingerprints the technology stack, audits cookie security flags, and probes for dangerous CORS misconfigurations — all in a single automated pass before any active exploitation begins.
+The Information Gathering module is the foundation of every WSTG-Scan assessment. Selecting option **2** from the main menu triggers a comprehensive enumeration phase that collects server metadata, inspects HTTP response headers, validates SSL/TLS certificate quality, identifies allowed HTTP methods, parses `robots.txt` and `sitemap.xml` for exposed paths, fingerprints the technology stack with WhatWeb, audits cookie security flags, and probes for CORS misconfigurations — all in a single automated pass before any active exploitation begins.
 
 ## What Gets Checked
 
 <CardGroup cols={2}>
   <Card title="Server & General Info" icon="server">
-    HTTP status code, `Server` header, response headers map, and cookie names harvested on the first request.
+    HTTP status code, `Server` header, full response headers map, and cookie names harvested on the first request to the target URL.
   </Card>
   <Card title="Technology Detection" icon="magnifying-glass">
-    WhatWeb integration (auto-installable via `apt`) with full plugin output; falls back to header-based detection when WhatWeb is absent.
+    WhatWeb integration with auto-installation via `apt`. Falls back to header-based detection (`X-Powered-By`, `PHPSESSID`, `ASP.NET`) when WhatWeb is absent or declined.
   </Card>
   <Card title="Security Headers" icon="shield">
-    Presence and value of HSTS, CSP, X-Frame-Options, X-Content-Type-Options, and Referrer-Policy.
+    Presence and value of HSTS, CSP, X-Frame-Options, X-Content-Type-Options, and Referrer-Policy. Missing headers trigger a `[!]` warning.
   </Card>
   <Card title="Cookie Security" icon="lock">
-    Per-cookie audit for missing `Secure`, `HttpOnly`, and `SameSite` flags.
+    Per-cookie audit for missing `Secure`, `HttpOnly`, and `SameSite` flags across every cookie in the session jar.
   </Card>
-  <Card title="SSL/TLS" icon="certificate">
-    Certificate subject inspection and protocol version check — flags anything older than TLSv1.2.
+  <Card title="SSL/TLS Inspection" icon="certificate">
+    Certificate subject inspection via a raw TLS handshake. Protocols older than TLSv1.2 (TLS 1.0, TLS 1.1, SSLv3) are flagged as insecure.
   </Card>
   <Card title="CORS Analysis" icon="arrow-right-arrow-left">
-    Wildcard + credentials combination, reflected-origin attacks, and preflight probes with malicious origins.
+    Wildcard + credentials combination, reflected-origin attacks, and OPTIONS preflight probes with malicious origins including null and subdomain variants.
   </Card>
 </CardGroup>
 
@@ -36,25 +36,25 @@ The Information Gathering module is the foundation of every WSTG-Scan assessment
     WSTG-Scan issues a GET request to the target URL and records the HTTP status code, `Server` header, all response headers, and the names of any cookies set. This baseline is stored in `SCAN_DATA["general"]` and used by every subsequent module.
   </Step>
   <Step title="Technology Fingerprinting via WhatWeb">
-    The scanner invokes `whatweb --color=never <target>`, parsing the brief-format output to extract plugin names and their detected values (CMS, framework, server, JavaScript libraries, analytics, and more). Results are displayed in a colour-coded table grouped by category.
+    The scanner invokes `whatweb` to extract CMS, framework, server, JavaScript library, and analytics information. Results are displayed in a colour-coded table.
 
-    If WhatWeb is not installed, the scanner prompts to install it automatically:
+    If WhatWeb is not installed, the scanner prompts to auto-install it:
 
     ```bash
     sudo apt-get install -y whatweb
     ```
 
-    When WhatWeb is unavailable and the prompt is declined, technology detection falls back to inspecting `Server`, `X-Powered-By`, and similar response headers directly.
+    When WhatWeb is unavailable and the prompt is declined, technology detection falls back to inspecting `Server`, `X-Powered-By`, `PHPSESSID` cookies, and `ASP.NET` strings in response headers.
 
     <Note>
-      If the scan session is authenticated, WhatWeb is invoked with the active session cookies and headers so that fingerprinting reflects the logged-in application state.
+      If the session is authenticated, WhatWeb is invoked with the active session cookies and headers so that fingerprinting reflects the logged-in application state.
     </Note>
   </Step>
   <Step title="robots.txt and sitemap.xml Parsing">
-    The module fetches `/robots.txt` and `/sitemap.xml`. Disallowed and allowed paths from `robots.txt` are collected into `SCAN_DATA["robots_paths"]` — these paths often reveal admin panels, backup endpoints, and other sensitive locations.
+    The module fetches `/robots.txt` and `/sitemap.xml`. All `Disallow:` and `Allow:` paths from `robots.txt` are extracted and stored in `SCAN_DATA["robots_paths"]`. These paths frequently reveal admin panels, backup endpoints, and other sensitive locations that are not linked from the main navigation.
   </Step>
   <Step title="HTTP Methods Enumeration">
-    An OPTIONS request is sent to the target root. The `Allow` response header is parsed and the result stored in `SCAN_DATA["http_methods"]`. Dangerous methods such as `PUT`, `DELETE`, and `TRACE` are highlighted.
+    An OPTIONS request is sent to the target root. The `Allow` response header is parsed and every permitted method is recorded in `SCAN_DATA["http_methods"]`. A TRACE request is also sent — if it returns HTTP 200, the scanner flags it as Cross-Site Tracing (XST) and adds `TRACE` to the allowed methods list.
   </Step>
   <Step title="Security Header Audit">
     The response headers captured in step 1 are evaluated against five required security headers:
@@ -70,25 +70,21 @@ The Information Gathering module is the foundation of every WSTG-Scan assessment
     Present headers are printed with their values in green; missing headers trigger a `[!]` warning.
   </Step>
   <Step title="Cookie Security Flags">
-    Every cookie in the session jar is individually checked. The scanner warns for each cookie that is missing the `Secure` flag (cookie transmitted over plain HTTP) or the `HttpOnly` flag (cookie accessible via JavaScript). `SameSite` posture is also noted.
+    Every cookie in the session jar is individually checked. The scanner warns for each cookie that is missing the `Secure` flag (cookie transmitted over plain HTTP), missing the `HttpOnly` flag (cookie accessible via JavaScript), or has a weak or absent `SameSite` attribute.
   </Step>
   <Step title="SSL/TLS Inspection">
-    For HTTPS targets, a raw TLS handshake is performed using Python's `ssl` module against `hostname:443`. The certificate subject and negotiated protocol version are retrieved. Protocols older than `TLSv1.2` (e.g., TLS 1.0, TLS 1.1, SSLv3) are flagged as insecure.
+    For HTTPS targets, a raw TLS handshake is performed using Python's `ssl` module against `hostname:443`. The certificate subject and negotiated protocol version are retrieved. Protocols older than `TLSv1.2` (e.g. TLS 1.0, TLS 1.1, SSLv3) are flagged as insecure.
 
     ```python
     # Excerpt from check_ssl_tls()
     context = ssl.create_default_context()
-    with socket.create_connection((hostname, port), timeout=10) as sock:
+    with socket.create_connection((hostname, port), timeout=DEFAULT_TIMEOUT) as sock:
         with context.wrap_socket(sock, server_hostname=hostname) as ssock:
             version = ssock.version()   # e.g. "TLSv1.3"
     ```
   </Step>
   <Step title="Advanced CORS Analysis">
-    The scanner tests four malicious origins against the target:
-    - `https://evil.com` — generic external origin
-    - `null` — null origin (used in sandboxed iframes)
-    - `https://<target>.evil.com` — subdomain of the target host
-    - `https://evil.<target>` — target as subdomain of attacker domain
+    The scanner tests multiple malicious origins against the target, including a generic external origin (`https://evil.com`), the `null` origin (used in sandboxed iframes), a subdomain-of-target variant, and a target-as-subdomain-of-attacker variant.
 
     For each origin, the scanner checks:
     - **Wildcard + credentials**: `Access-Control-Allow-Origin: *` combined with `Access-Control-Allow-Credentials: true` — this combination is treated as critical.
@@ -99,14 +95,14 @@ The Information Gathering module is the foundation of every WSTG-Scan assessment
 
 ## Security Header Details
 
-The following headers are audited during every information gathering run:
+The following five headers are audited on every information gathering run:
 
 <Accordion title="Strict-Transport-Security (HSTS)">
   HSTS instructs browsers to only connect via HTTPS. Its absence means an attacker on the same network can downgrade connections to plain HTTP. A recommended value is `max-age=31536000; includeSubDomains; preload`.
 </Accordion>
 
 <Accordion title="Content-Security-Policy (CSP)">
-  CSP restricts which origins can load scripts, stylesheets, and other resources. Without it, injected scripts execute freely. The scanner reports the presence or absence of the header; evaluating the policy's strictness is a manual follow-up step.
+  CSP restricts which origins can load scripts, stylesheets, and other resources. Without it, injected scripts execute freely. The scanner reports presence or absence; evaluating the policy's strictness is a manual follow-up step.
 </Accordion>
 
 <Accordion title="X-Frame-Options">
@@ -150,7 +146,7 @@ The following headers are audited during every information gathering run:
 
 ## Data Stored for Reports
 
-All findings from this module are merged into `SCAN_DATA["general"]` and contribute to every report format:
+All findings from this module are merged into `SCAN_DATA["general"]` and `SCAN_DATA["robots_paths"]`, contributing to every report format:
 
 ```json title="SCAN_DATA['general'] structure"
 {
@@ -170,5 +166,5 @@ All findings from this module are merged into `SCAN_DATA["general"]` and contrib
 ```
 
 <Tip>
-  Run the Information Gathering module first in every assessment — its results (server version, technology stack, cookie names) are used by later modules including the source code analyser, injection tests, and the HTML dashboard.
+  Run the Information Gathering module first in every assessment. Its results — server version, technology stack, cookie names, and robots.txt paths — are consumed by later modules including injection tests, source code analysis, and the HTML dashboard report.
 </Tip>

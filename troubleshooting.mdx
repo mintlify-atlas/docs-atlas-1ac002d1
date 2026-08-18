@@ -12,13 +12,13 @@ Most issues with WSTG-Scan fall into one of three categories: missing system dep
 
 **Symptom:** The script exits immediately at startup with a Python import error such as:
 
-```
+```text
 Traceback (most recent call last):
   ...
 ModuleNotFoundError: No module named 'requests'
 ```
 
-**Cause:** The required Python packages are not installed in the active Python environment. WSTG-Scan depends on four packages: `requests`, `beautifulsoup4`, `colorama`, and `tqdm`.
+**Cause:** The required Python packages are not installed in the active Python environment. WSTG-Scan depends on `requests`, `beautifulsoup4`, `colorama`, and `tqdm` as core packages.
 
 **Fix:** Install all dependencies from `requirements.txt`:
 
@@ -44,7 +44,7 @@ pip install -r requirements.txt
 
 **Symptom:** When selecting directory fuzzing (option 6) or vhost fuzzing (option 5), the scanner warns that `ffuf` is not available and falls back to the slower internal multithreaded method.
 
-```
+```text
 [!] ffuf no encontrado. Usando método interno multihilo.
 ```
 
@@ -68,20 +68,20 @@ Or download the latest binary directly from the [official releases](https://gith
 
 **Symptom A:** Nuclei produces many lines like the following and seems to stall:
 
-```
+```text
 [ERR] Could not unmarshal interaction data: ...
 ```
 
 **Symptom B:** Nuclei runs but takes an unusually long time with no findings output.
 
-**Cause:** These messages originate from the [Interactsh](https://github.com/projectdiscovery/interactsh) out-of-band (OOB) callback server that Nuclei uses for blind vulnerability detection. The backend occasionally sends malformed or unreachable callbacks, which Nuclei logs as errors. WSTG-Scan already filters `Could not unmarshal interaction data` lines from the live output stream, so they are suppressed but the underlying Interactsh connections may still slow things down.
+**Cause:** These messages originate from the [Interactsh](https://github.com/projectdiscovery/interactsh) out-of-band (OOB) callback server that Nuclei uses for blind vulnerability detection. The backend occasionally sends malformed or unreachable callbacks, which Nuclei logs as errors. WSTG-Scan already filters `Could not unmarshal interaction data` lines from the live output stream, so they are suppressed — but the underlying Interactsh connections may still slow things down.
 
 **Fix — Filter only (default):** No action needed. The scanner filters `Could not unmarshal interaction data` automatically. The errors are cosmetic and do not affect result quality.
 
 **Fix — Disable Interactsh entirely:** Add `-ni` (no-interactsh) to the Nuclei command in `wstg-scan.py`. Find the Nuclei `cmd` list in the source and append the flag:
 
 ```python title="wstg-scan.py — disable Interactsh"
-# Locate the cmd list inside the nuclei scanning function (~line 1066):
+# Locate the cmd list inside the nuclei scanning function:
 cmd = ["nuclei", "-u", target, "-jsonl-export", json_path]
 
 # Append -ni to disable OOB callbacks:
@@ -98,7 +98,7 @@ cmd = ["nuclei", "-u", target, "-jsonl-export", json_path, "-ni"]
 
 **Symptom:** Hydra reports no valid credentials for one or more usernames, even though you know those credentials are correct. The scanner may print:
 
-```
+```text
 [!] Hydra no encontró credenciales para 2 usuario(s). Reintentando con sesión real (CSRF-aware)...
 ```
 
@@ -123,11 +123,11 @@ python3 wstg-scan.py --url https://target.example.com --delay 1.0
 
 **Symptom:** The spider logs `Exceeded N redirects` for many URLs and stops after visiting only a handful of pages.
 
-```
+```text
 [!] TooManyRedirects: Exceeded 10 redirects.
 ```
 
-**Cause:** The target application has long redirect chains—for example, an authentication flow that redirects through several intermediate pages before landing on the final URL. Each redirect counts toward the `MAX_REDIRECTS` limit per request. WSTG-Scan handles `TooManyRedirects` gracefully (it does not abort the spider phase), but affected URLs are skipped and the total crawl depth is reduced.
+**Cause:** The target application has long redirect chains — for example, an authentication flow that redirects through several intermediate pages before landing on the final URL. Each redirect counts toward the `MAX_REDIRECTS` limit per request. WSTG-Scan handles `TooManyRedirects` gracefully (it does not abort the spider phase), but affected URLs are skipped and the total crawl depth is reduced.
 
 **Fix:** Increase `MAX_REDIRECTS` in `wstg-scan.py`:
 
@@ -140,7 +140,7 @@ MAX_REDIRECTS = 20
 ```
 
 <Note>
-  `MAX_REDIRECTS` is applied to the `requests.Session` object via `session.max_redirects`. Increasing it applies to every HTTP call in the session, including fuzzing and injection tests—not just the spider.
+  `MAX_REDIRECTS` is applied to the `requests.Session` object via `session.max_redirects`. Increasing it applies to every HTTP call in the session, including fuzzing and injection tests — not just the spider.
 </Note>
 
 </Accordion>
@@ -149,7 +149,7 @@ MAX_REDIRECTS = 20
 
 **Symptom:** When attempting to authenticate against a Single-Page Application (Angular, Vue, React) or an OAuth2/PKCE flow, the scanner warns:
 
-```
+```text
 [!] Playwright no instalado. Instalar para soportar SPAs/OAuth2:
     pip install playwright && playwright install chromium
 [?] Instalar Playwright ahora? [s/N]:
@@ -168,7 +168,7 @@ playwright install chromium
 
 **Alternative — Manual session mode:** If you do not want to install Playwright, use the manual session option in menu option 1. Complete the login in your browser, copy the full cookie string from the browser DevTools (Application → Cookies), and paste it when prompted.
 
-```
+```text
 [?] Cookie completa (ej: PHPSESSID=...; csrftoken=...):
 > PHPSESSID=abc123; csrftoken=xyz456; sessionid=qwerty
 ```
@@ -179,7 +179,7 @@ playwright install chromium
 
 **Symptom:** WPScan runs and detects plugins and themes but reports zero vulnerabilities, or prints a warning about the API token:
 
-```
+```text
 [!] No API Token given, as a result vulnerability data has not been output.
 ```
 
@@ -193,11 +193,11 @@ playwright install chromium
     export WPSCAN_API_TOKEN=your_token_here
     python3 wstg-scan.py
     ```
-    WSTG-Scan reads `WPSCAN_API_TOKEN` (or `WPVULNDB_API_TOKEN`) automatically before calling WPScan.
+    WSTG-Scan reads `WPSCAN_API_TOKEN` from the environment automatically before calling WPScan. The fallback variable `WPVULNDB_API_TOKEN` is also checked if the primary variable is not set.
   </Tab>
   <Tab title="Interactive Prompt">
     When running option 13 or a full pentest (option 15), the scanner prompts:
-    ```
+    ```text
     [?] Token API WPVulnDB/WPScan (opcional, Enter para omitir):
     > your_token_here
     ```

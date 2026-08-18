@@ -49,7 +49,7 @@ WSTG-Scan runs on any Python 3.8+ system, but it is best supported on Kali Linux
   <Step title="Install Python dependencies">
     Install the four required Python packages from `requirements.txt`:
 
-    ```bash title="requirements.txt"
+    ```bash
     pip install -r requirements.txt
     ```
 
@@ -61,6 +61,15 @@ WSTG-Scan runs on any Python 3.8+ system, but it is best supported on Kali Linux
     | `beautifulsoup4` | HTML parsing for spidering and form detection |
     | `colorama` | Cross-platform ANSI colour output |
     | `tqdm` | Progress bars for spidering, fuzzing, and brute-force |
+
+    <Tip>
+      **Playwright (optional)** — required only for headless SPA/OAuth2 login (Angular, Vue, React, or OAuth2/PKCE flows). If the tool detects it is needed at runtime it will offer to install it automatically. To install it manually:
+
+      ```bash
+      pip install playwright
+      playwright install chromium
+      ```
+    </Tip>
   </Step>
 
   <Step title="Install optional external tools">
@@ -128,8 +137,8 @@ WSTG-Scan runs on any Python 3.8+ system, but it is best supported on Kali Linux
 
     You should see output similar to:
 
-    ```
-    WSTG-Scan v1.4.2
+    ```text
+    WSTG Scanner v1.4.2
     ```
 
     To do a full smoke-test, launch the interactive menu:

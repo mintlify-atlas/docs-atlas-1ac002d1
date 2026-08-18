@@ -10,7 +10,7 @@ After every scan session WSTG-Scan writes four report files automatically. Each 
 
 Reports are saved to `reports/<host>/<host>.{txt,json,html,md}` relative to the current working directory. The host component is derived from the target URL, with non-alphanumeric characters replaced by underscores so the path is always filesystem-safe.
 
-```
+```text
 reports/
 └── example_com/
     ├── example_com.txt
@@ -19,7 +19,7 @@ reports/
     └── example_com.md
 ```
 
-Use `--output` (or `-o`) to override the base path. All four formats are still written; only the directory and file prefix change.
+Use `--output` (or `-o`) to override the base path. All four formats (TXT, JSON, HTML, and Markdown) are still written; only the directory and file prefix change.
 
 ```bash
 python3 wstg-scan.py --url https://example.com --output /tmp/pentest/example
@@ -34,13 +34,13 @@ WSTG-Scan generates four complementary formats from the same in-memory scan data
 
 <CardGroup cols={2}>
   <Card title="TXT" icon="file-lines">
-    Plain-text summary suitable for quick reading, grep, or pasting into notes. Sections: General Info, Nmap + NSE, WordPress, Spidering, API Endpoints, VHosts, Directories, Credentials, Source Code Analysis, Active Directory, Advanced Security Tests, Findings, and Nuclei.
+    Plain-text summary suitable for quick reading, grep, or pasting into notes. Sections in order: Summary stats, General Info, Nmap ports, Nmap NSE, Enumeration (users/emails), WordPress, Spidering, API Endpoints, VHosts, Directories, Bruteforce Credentials, Source Code Analysis, Active Directory, Advanced Security Tests, Findings, and Nuclei.
   </Card>
   <Card title="JSON" icon="code">
     Fully serialized scan data, including all `SCAN_DATA` keys and `FINDINGS`. Ideal for downstream tooling, CI/CD pipelines, SIEM ingestion, or scripted analysis.
   </Card>
   <Card title="HTML" icon="browser">
-    A self-contained interactive SaaS dashboard. Light/dark theme, collapsible sidebar, live table search, KPI cards, risk severity gauge, and PDF export. All sections are present only when data exists.
+    A self-contained interactive SaaS dashboard. Light/dark theme, collapsible sidebar, live table search, KPI cards, risk severity gauge, and PDF export. Sections are rendered only when the corresponding module produced data.
   </Card>
   <Card title="Markdown" icon="markdown">
     Standard Markdown formatted for immediate import into GitBook, GitHub, or Obsidian. Includes tables, section headings, and an executive summary.
@@ -49,9 +49,9 @@ WSTG-Scan generates four complementary formats from the same in-memory scan data
 
 ### TXT Report
 
-The plain text report is structured with labeled blocks and is human-readable without any tooling. Each section is guarded—if a module was not executed, the block reads `No ejecutado` rather than being omitted entirely.
+The plain text report is structured with labeled blocks and is human-readable without any tooling. Each section is guarded — if a module was not executed, the block reads `No ejecutado` rather than being omitted entirely.
 
-```
+```text
 WSTG Scanner v1.4.2 - Reporte de Escaneo
 Objetivo : https://example.com
 Fecha    : 2025-01-15 14:30:00
@@ -74,6 +74,15 @@ Modo auth: No
 - 22/tcp [open] ssh — OpenSSH 8.9p1
 - 80/tcp [open] http — nginx 1.25.3
 - 443/tcp [open] https — nginx 1.25.3
+...
+
+[NMAP NSE DIRIGIDO]
+- 443/tcp https http-title: Example Domain
+...
+
+[ENUMERACIÓN]
+- Usuarios: admin, editor
+- Emails: admin@example.com
 ...
 
 [HALLAZGOS]
@@ -103,20 +112,19 @@ The JSON report contains the full `report_data` dictionary, including a `stats` 
     "stats": {
       "total_findings": 12,
       "total_open_ports": 4,
-      "total_nuclei_findings": 7,
       "total_dir_hits": 23,
       "total_vhosts": 2,
       "source_code_pages_analyzed": 18,
       "total_source_code_findings": 5
     },
-    "nmap": { "ports": [...], "nse_results": [...] },
-    "nuclei_findings": [...],
-    "api_endpoints": [...],
-    "vhosts": [...],
-    "directory_hits": [...],
-    "source_code_analysis": { "findings": [...] },
-    "active_directory": {...},
-    "bruteforce_credentials": [...]
+    "nmap": { "ports": ["..."], "nse_results": ["..."] },
+    "nuclei_findings": ["..."],
+    "api_endpoints": ["..."],
+    "vhosts": ["..."],
+    "directory_hits": ["..."],
+    "source_code_analysis": { "findings": ["..."] },
+    "active_directory": {},
+    "bruteforce_credentials": ["..."]
   }
 }
 ```
@@ -170,7 +178,7 @@ Metrics shown (when data is present): Findings, Ports, NSE results, Nuclei findi
 
 The hero section displays an animated donut chart built from the combined Nuclei and source-code-analysis severity counts. The gauge shows Critical, High, Medium, Low, and Info slices proportionally. The center label reports the overall risk level (`CRITICO`, `ALTO`, `MEDIO`, `BAJO`, or `LIMPIO`) with a numeric risk score calculated as:
 
-```
+```text
 score = (critical × 10) + (high × 5) + (medium × 2) + low
 ```
 
@@ -215,7 +223,7 @@ All sections are conditionally rendered — a section is only included when the 
 </Accordion>
 
 <Accordion title="Directorios (Directories)">
-  Directory fuzzing hits with HTTP status, URL, and response size. Authenticated redirect resolution results appear here with `302→200` status notation and `NOTA` column annotations.
+  Directory fuzzing hits with HTTP status, URL, and response size. Authenticated redirect resolution results appear here with `302→200` status notation and `NOTA` column annotations distinguishing accessible endpoints from login-protected ones.
 </Accordion>
 
 <Accordion title="Superficie Expuesta (Exposed Surface)">

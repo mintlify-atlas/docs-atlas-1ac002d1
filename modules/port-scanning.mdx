@@ -1,10 +1,10 @@
 ---
-title: "Port Scanning with Nmap Service Detection and NSE Audit"
+title: "Port Scanning with Nmap Service Detection and NSE Scripts"
 sidebarTitle: "Port Scanning"
-description: "Menu option 3 runs nmap -sV, parses XML output for full port metadata, then runs targeted NSE default,vuln,safe scripts on every open port."
+description: "Menu option 3 runs nmap -sV, parses XML output for full port metadata, then runs targeted NSE default,vuln,safe scripts on every open port found."
 ---
 
-The Port Scanning module (menu option **3**) integrates Nmap directly into the WSTG-Scan workflow. It extracts the hostname from the target URL, executes a service-version scan (`nmap -sV`), parses the XML output for complete port metadata, displays a colour-coded results table, and then immediately follows up with a targeted NSE script scan — running the `default,vuln,safe` script sets against only the ports that are actually open. Every open port is recorded in the global `FINDINGS` list with a `[PORT]` prefix so it appears in all report formats.
+The Port Scanning module (menu option **3**) integrates Nmap directly into the WSTG-Scan workflow. It extracts the hostname from the target URL, executes a service-version scan (`nmap -sV`), parses the XML output for complete port metadata, displays a colour-coded results table, and then immediately follows up with a targeted NSE script scan — running the `default,vuln,safe` script categories against only the ports that are actually open. Every open port is recorded in the global `FINDINGS` list with a `[PORT]` prefix so it appears in all report formats.
 
 ## Two-Phase Scan Design
 
@@ -18,7 +18,7 @@ The module runs in two consecutive phases so that the slower NSE scripts only to
     nmap -sV -oX - <host>
     ```
 
-    The `-oX -` flag writes XML output to stdout, which is captured and parsed in memory — no temporary files required. The scan runs with a **1800-second timeout** and can be interrupted at any time with **Ctrl+C**, which triggers a clean shutdown that preserves any partial results already collected.
+    The `-oX -` flag writes XML output to stdout, which is captured and parsed in memory — no temporary files required. The scan runs with a **1800-second timeout** and can be interrupted at any time with **Ctrl+C**, which triggers a clean shutdown and preserves any partial results already collected.
   </Step>
   <Step title="Phase 2 — Targeted NSE Script Scan">
     After Phase 1 completes, a second Nmap invocation targets only the open ports discovered in Phase 1:
@@ -27,7 +27,7 @@ The module runs in two consecutive phases so that the slower NSE scripts only to
     nmap -sV --script default,vuln,safe -p <port-spec> -oX - <host>
     ```
 
-    The port specification is built automatically from the Phase 1 results (e.g. `-p 22,80,443` for TCP-only, or `-p T:22,80,U:161` when UDP ports are present). If UDP ports were found in Phase 1, `-sU` is added to the NSE command. This targeted approach avoids wasting time on the full port range and limits the attack surface for the `vuln` script category.
+    The port specification is built automatically from the Phase 1 results (e.g. `-p 22,80,443`). If UDP ports were found in Phase 1, `-sU` is added to the NSE command. This targeted approach avoids wasting time on the full port range and limits the attack surface for the `vuln` script category. The NSE phase has its own 2400-second timeout.
   </Step>
 </Steps>
 
@@ -101,7 +101,7 @@ The NSE phase runs three script categories simultaneously:
 
 | Script Category | Purpose |
 |---|---|
-| `default` | Standard scripts enabled by default — banner grabbing, auth detection, common enumeration |
+| `default` | Standard scripts — banner grabbing, auth detection, common enumeration |
 | `vuln` | Known vulnerability checks (CVE probes, outdated software detection) |
 | `safe` | Scripts that do not risk crashing the target service |
 
@@ -111,11 +111,11 @@ If the session is authenticated, HTTP-aware NSE scripts receive the active sessi
 --script-args "http.useragent=<ua>,http.cookie=<session-cookie>"
 ```
 
-NSE results are displayed in a second table after the port table. Findings that contain keywords like `vulnerable`, `CVE-`, `exploit`, `backdoor`, `XSS`, or `SQL injection` in their output are highlighted in red and automatically added to `FINDINGS` with the `[NMAP:NSE]` prefix.
+NSE results are displayed in a second table after the port table. Findings that contain keywords like `vulnerable`, `CVE-`, `exploit`, `backdoor`, `XSS`, or `SQL injection` in their output are highlighted and automatically added to `FINDINGS` with the `[NMAP:NSE]` prefix.
 
 ## FINDINGS Integration
 
-Every open port discovered in Phase 1 is appended to the global `FINDINGS` list:
+Every open port discovered in Phase 1 is appended to the global `FINDINGS` list with the `[PORT]` prefix:
 
 ```text
 [PORT] 10.10.11.45:22/tcp ssh (OpenSSH 8.9p1)
@@ -154,16 +154,16 @@ These entries appear in the **Hallazgos** (Findings) section of every report for
     "executed": true,
     "command": "nmap -sV --script default,vuln,safe -p 22,80,443 -oX - example.com",
     "ports_scanned": "22,80,443",
-    "results": [...]
+    "results": []
   },
-  "nse_results": [...]
+  "nse_results": []
 }
 ```
 
 <Warning>
-  The `vuln` NSE category sends active exploit-like probes. Only run this module against targets you are explicitly authorised to test. The NSE scan timeout is 2400 seconds for hosts with many services.
+  The `vuln` NSE category sends active exploit-like probes. Only run this module against targets you are explicitly authorised to test. The Phase 1 scan timeout is 1800 seconds; the NSE scan timeout is 2400 seconds for hosts with many open services.
 </Warning>
 
 <Tip>
-  Press **Ctrl+C** at any time to interrupt the scan cleanly. The scanner will wait up to 5 seconds for Nmap to flush its XML output before terminating the process, so partial results are preserved in `SCAN_DATA` and written to the report.
+  Press **Ctrl+C** at any time to interrupt either phase cleanly. The scanner handles `KeyboardInterrupt` and preserves any partial results already collected in `SCAN_DATA` so they are included in the report.
 </Tip>

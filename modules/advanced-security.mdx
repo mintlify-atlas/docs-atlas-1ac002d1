@@ -1,5 +1,5 @@
 ---
-title: "Advanced Security Testing: SSRF, SSTI, XXE, CRLF"
+title: "Advanced Security Testing: SSRF, SSTI, XXE, CRLF, Smuggling"
 sidebarTitle: "Advanced Security"
 description: "Six advanced attack modules: SSRF, SSTI, XXE, CRLF injection, HTTP request smuggling, and cache poisoning against real injection points."
 ---
@@ -14,29 +14,43 @@ Menu option 10 groups six high-impact server-side attack modules under a single 
 
 ## SSRF — Server-Side Request Forgery
 
-The SSRF module collects injection vectors from three sources before sending a single probe: GET parameters, POST form fields, and up to 60 of the API endpoints discovered during spidering. For each endpoint, it additionally fuzzes a set of common SSRF parameter names (`url`, `redirect`, `src`, etc.) to catch endpoints whose forms were not captured by the crawler.
+The SSRF module collects injection vectors from three sources before sending a single probe: GET parameters, POST form fields, and up to 60 of the API endpoints discovered during spidering. For each endpoint, it additionally fuzzes a set of common SSRF parameter names to catch endpoints whose forms were not captured by the crawler.
 
-### URL Parameter Probes
+### URL Parameter Names
 
-Payloads are sent through each discovered parameter with deterministic oracles — the response is checked for content that only appears when the server fetched the internal resource, not just content that echoes the payload:
+The following parameter names are fuzzed against every discovered endpoint:
+
+```python title="SSRF_URL_PARAMS"
+"url", "uri", "path", "src", "source", "dest", "destination",
+"redirect", "return", "callback", "next", "continue", "to",
+"out", "view", "file", "load", "fetch", "link", "href",
+"feed", "host", "proxy", "forward", "api"
+```
+
+### Deterministic Oracle Probes
+
+Payloads use internal-resource oracles — the response is checked for content that only appears when the server fetched the resource, not just content that echoes the payload:
 
 | Target | Oracle markers |
 |--------|---------------|
 | `file:///etc/passwd` | `root:x:0:0:`, `daemon:x:`, `:/bin/bash` |
 | AWS IMDSv1 `http://169.254.169.254/latest/meta-data/` | `ami-id`, `instance-id`, `local-hostname` |
-| GCP metadata `http://metadata.google.internal/computeMetadata/v1/` | `project-id`, `numeric-project-id` |
-| Alibaba Cloud metadata `http://100.100.100.200/latest/meta-data/` | `region-id`, `instance-id` |
+| GCP metadata `http://metadata.google.internal/computeMetadata/v1/` | `computemetadata`, `project/`, `instance/` |
 
 ### HTTP Header Injection
 
 After URL parameters, the module sends the same cloud-metadata probes via common proxy and forwarding headers against the target root:
 
-```
-X-Forwarded-For
-X-Original-URL
-Client-IP
-Referer
-Origin
+```python title="SSRF_HEADERS"
+"X-Forwarded-For"
+"X-Real-IP"
+"X-Original-URL"
+"X-Rewrite-URL"
+"Client-IP"
+"True-Client-IP"
+"Referer"
+"Origin"
+"X-Forwarded-Host"
 ```
 
 ### Out-of-Band (OOB) Support
@@ -52,19 +66,19 @@ python3 wstg-scan.py
 
 ## SSTI — Server-Side Template Injection
 
-SSTI detection uses math probes with a distinctive result (`1337 × 1337 = 1787569`) that cannot appear in the response by coincidence and is not present in the payload itself, eliminating false positives from simple reflection.
+SSTI detection uses math probes with a distinctive result (`1337 × 1337 = 1787569`) that cannot appear in the response by coincidence and is not present in the payload itself, eliminating false positives from simple reflection. Tests are run against every GET and POST injection point collected from the spider, plus common template parameter names (`template`, `tpl`, `render`, `preview`, `name`, `q`, `search`, `message`, `input`, `content`, `page`, `view`).
 
 ### Math Probes by Engine
 
 ```python title="SSTI_PROBES"
-("{{1337*1337}}",   "1787569", "Jinja2/Twig/Nunjucks")
-("${1337*1337}",    "1787569", "FreeMarker/Thymeleaf EL")
-("#{1337*1337}",    "1787569", "Ruby/Pebble")
-("<%= 1337*1337 %>","1787569", "ERB/EJS")
-("${{1337*1337}}",  "1787569", "Pebble")
-("%{{1337*1337}}",  "1787569", "Tornado/Mako")
-("[[${1337*1337}]]","1787569", "Thymeleaf")
-("{{1337*'1'}}",    "1337",    "Twig/Jinja2 str")
+("{{1337*1337}}",    "1787569", "Jinja2/Twig/Nunjucks")
+("${1337*1337}",     "1787569", "FreeMarker/Thymeleaf EL")
+("#{1337*1337}",     "1787569", "Ruby/Pebble")
+("<%= 1337*1337 %>", "1787569", "ERB/EJS")
+("${{1337*1337}}",   "1787569", "Pebble")
+("%{{1337*1337}}",   "1787569", "Tornado/Mako")
+("[[${1337*1337}]]", "1787569", "Thymeleaf")
+("{{1337*'1'}}",     "1337",    "Twig/Jinja2 str")
 ```
 
 When `1787569` appears in the body, the specific template engine is identified and reported in the finding. If no math result is found but a template-engine exception trace appears, the module reports a probable SSTI at `high` severity.
@@ -112,7 +126,7 @@ Up to 80 candidates are probed. A quick `POST <x/>` probe with `Content-Type: ap
 <root><name>&xxe;</name>...</root>
 ```
 
-The entity is injected into multiple common field names simultaneously (`name`, `data`, `value`, `message`, `text`, `comment`, `title`, `content`, `email`, `subject`) to maximise the chance that the backend reflects the resolved entity in its response. Field names discovered in actual forms are prepended to this default list.
+The entity is injected into multiple common field names simultaneously (`name`, `data`, `value`, `message`, `text`, `comment`, `title`, `content`, `email`, `subject`, `input`, `xml`, `body`) to maximise the chance that the backend reflects the resolved entity in its response. Field names discovered in actual forms are prepended to this default list.
 
 ---
 

@@ -31,13 +31,13 @@ Interactive mode is the default. Launch the scanner with no arguments and it pro
 
     The ASCII banner and version header appear immediately, followed by a prompt asking whether you want to scan a single URL or a list:
 
-    ```
-     _       __       __         _____
-    | |     / /_____ / /_ ____ _/ ___/  _____ ____ _ ____
-    | | /| / // ___// __// __ `/\__ \  / ___// __ `// __ \
-    | |/ |/ /(__  )/ /_ / /_/ /___/ / / /__ / /_/ // / / /
-    |__/|__//____/ \__/ \__, //____/ \___/ \__,_//_/ /_/
-                       /____/
+    ```text
+     _       __       __         _____                   
+    | |     / /_____ / /_ ____ _/ ___/ _____ ____ _ ____ 
+    | | /| / // ___// __// __ `/\__ \ / ___// __ `// __ \
+    | |/ |/ /(__  )/ /_ / /_/ /___/ // /__ / /_/ // / / /
+    |__/|__//____/ \__/ \__, //____/ \___/ \__,_//_/ /_/ 
+                       /____/                            
 
     OWASP Web Security Testing Scanner
     developed by @afsh4ck
@@ -51,7 +51,7 @@ Interactive mode is the default. Launch the scanner with no arguments and it pro
   <Step title="Enter the target URL">
     Type or paste the full URL of the target application, including the scheme:
 
-    ```
+    ```text
     Target URL: https://example.com
     ```
 
@@ -61,7 +61,7 @@ Interactive mode is the default. Launch the scanner with no arguments and it pro
   <Step title="Explore the main menu">
     The main menu lists all 15 test modules plus reporting options:
 
-    ```
+    ```text
     ====================================================
       WSTG SCANNER v1.4.2  [Sin autenticación]
     ====================================================
@@ -82,14 +82,14 @@ Interactive mode is the default. Launch the scanner with no arguments and it pro
     15. PENTESTING COMPLETO (ejecuta todas las pruebas anteriores)
                                               (tras escanear aparecen)
     16. Mostrar resumen en Markdown
-    17. Mostrar tablas de resultados
+    17. Mostrar tablas de resultados (formato visual)
                                               (siempre visible)
     18. Salir
     ====================================================
     Selecciona una opción:
     ```
 
-    Modules 16 and 17 (Markdown summary and results tables) only appear after at least one scan module has run and produced findings.
+    Options 16 and 17 (Markdown summary and results tables) only appear after at least one scan module has run and produced findings. Option 18 is always visible.
   </Step>
 
   <Step title="(Optional) Configure authentication">
@@ -109,7 +109,7 @@ Interactive mode is the default. Launch the scanner with no arguments and it pro
   <Step title="Generate a report">
     At any point after scanning, press the report option that appears in the menu, or simply let the full pentest (option 15) generate one automatically. Reports are saved to:
 
-    ```
+    ```text
     reports/<hostname>/<hostname>.txt
     reports/<hostname>/<hostname>.json
     reports/<hostname>/<hostname>.md
@@ -191,7 +191,7 @@ https://api.example.com
 In batch mode, WSTG-Scan:
 
 1. Reads and deduplicates all URLs from the file (blank lines and `#` comments are ignored).
-2. Runs the full pentest chain (modules 2–13) on each target sequentially.
+2. Runs the full pentest chain (modules 2–14, excluding Active Directory) on each target sequentially.
 3. Saves a separate report set in `reports/<host>/` for each target.
 4. Prints a global summary table of findings per target when all scans complete.
 

@@ -1,7 +1,7 @@
 ---
-title: "WSTG-Scan: OWASP Web Security Testing Guide Scanner"
+title: "WSTG-Scan: Interactive OWASP Web Security CLI Tool"
 sidebarTitle: "Introduction"
-description: "An interactive CLI tool that automates OWASP WSTG methodology with 15 scanning modules, external tool integrations, and multi-format reporting."
+description: "An interactive Python CLI that automates OWASP WSTG methodology with 15 scanning modules, 9 external tool integrations, and four report formats."
 ---
 
 WSTG-Scan is an interactive, comprehensive web security testing tool built for pentesters and bug bounty hunters. Written in Python, it implements the full [OWASP Web Security Testing Guide (WSTG)](https://owasp.org/www-project-web-security-testing-guide/) and the [OWASP API Security Top 10](https://owasp.org/API-Security/) methodology through a guided terminal menu. Rather than stringing together a dozen separate tools manually, WSTG-Scan orchestrates reconnaissance, fuzzing, injection testing, authentication analysis, and report generation from a single entry point — keeping all session state, findings, and results in one place across every module you run.
@@ -21,7 +21,7 @@ The [OWASP Web Security Testing Guide](https://owasp.org/www-project-web-securit
 
 ## The 15 Scanning Modules
 
-The main menu exposes 15 distinct testing capabilities (options 1–15), covering the full OWASP WSTG lifecycle:
+The main menu exposes 15 distinct testing capabilities (options 1–15). Options 16 and 17 (Markdown summary and results tables) appear dynamically once scan data exists, and option 18 exits the tool — giving 18 menu entries in total.
 
 | # | Module | What It Tests |
 |---|--------|---------------|
@@ -58,11 +58,20 @@ WSTG-Scan acts as an orchestrator for best-in-class external tools. When a tool 
   <Card title="Hydra" icon="key">
     Network login brute-forcer used in module 12 with a CSRF-aware internal fallback for targets that use session tokens.
   </Card>
-  <Card title="WPScan" icon="wordpress">
+  <Card title="WPScan" icon="globe">
     WordPress-specific scanner for plugin/theme CVEs, user enumeration, and credential attacks in module 13.
   </Card>
   <Card title="Impacket" icon="server">
     `impacket-GetNPUsers` and `impacket-GetUserSPNs` power AS-REP Roasting and Kerberoasting in the Active Directory module (14).
+  </Card>
+  <Card title="Kerbrute" icon="lock">
+    User enumeration against Kerberos pre-authentication. Used in the Active Directory module (14) to identify valid domain accounts.
+  </Card>
+  <Card title="ldap-utils" icon="database">
+    `ldapsearch` queries for listing domain users, groups, and computers in the Active Directory module (14).
+  </Card>
+  <Card title="NetExec (nxc)" icon="network">
+    SMB enumeration, password spraying, and brute-force via `nxc smb` in the Active Directory module (14).
   </Card>
 </CardGroup>
 

@@ -42,7 +42,7 @@ When WordPress is detected during the full pentest, the module is automatically 
 WPScan is invoked in two passes: first with `--format cli` so its native coloured output streams to the terminal in real time, then with `--format json` to generate a machine-readable summary. Both passes use the same enumeration flags.
 
 <Note>
-  WPScan requires a free API token from [wpscan.com](https://wpscan.com) to retrieve CVE data for plugins, themes, and WordPress core. Without a token, vulnerability counts will be zero. Set your token by entering it at the prompt or by configuring the `WPSCAN_API_TOKEN` environment variable before running the scanner.
+  WPScan requires a free API token from [wpscan.com](https://wpscan.com) to retrieve CVE data for plugins, themes, and WordPress core. Without a token, vulnerability counts will be zero. Set your token via the `WPSCAN_API_TOKEN` environment variable (or the legacy `WPVULNDB_API_TOKEN`) before running the scanner, or enter it interactively at the prompt.
 </Note>
 
 ### Enumeration Flags
@@ -91,8 +91,9 @@ After enumeration, the module offers to run a password attack against the discov
 wpscan --url https://target.com \
   --password-attack xmlrpc \
   -t 20 \
-  -U /tmp/wp_users.txt \
-  -P /usr/share/seclists/Passwords/xato-net-10-million-passwords-10000.txt
+  -U /tmp/wpscan_users_<id>.txt \
+  -P /usr/share/seclists/Passwords/xato-net-10-million-passwords-10000.txt \
+  --format cli
 ```
 
 The `xmlrpc` attack mode uses the XML-RPC multicall method (`system.multicall`) to test multiple credentials per HTTP request, making it significantly faster than the standard login form attack. The `wp-login` mode is also available.
@@ -104,7 +105,7 @@ The `xmlrpc` attack mode uses the XML-RPC multicall method (`system.multicall`) 
 After enumeration and (optionally) brute force complete, WSTG-Scan prints a structured summary table:
 
 | Field | Content |
-|-------|---------|
+|-------|---------| 
 | WordPress version | Detected version number and its release status |
 | Main theme | Active theme name, version, and detected vulnerabilities |
 | Plugins found | Count of all detected plugins |

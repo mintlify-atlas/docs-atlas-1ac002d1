@@ -1,18 +1,18 @@
 ---
 title: "BFS Website Spidering with Form and Input Discovery"
 sidebarTitle: "Spidering"
-description: "Menu option 7 performs BFS crawling with configurable depth and page limits, detects deduplicated forms, and feeds URLs to injection and source analysis."
+description: "Menu option 7 BFS-crawls with configurable depth and page limits, deduplicates forms by action/method, and seeds injection tests and source code analysis."
 ---
 
 The Spidering module (menu option **7**) performs a breadth-first crawl of the target application, building a complete map of reachable URLs, query parameters, and HTML forms. The results are stored in `SCAN_DATA["spider"]` and reused by two downstream modules — the **Injection Tests** (option 9) and the **Source Code Analysis** (option 8) — so a thorough spider run before either of those modules dramatically expands coverage without requiring duplicate HTTP requests.
 
 ## How the Crawler Works
 
-The spider uses a standard BFS queue (`collections.deque`) seeded with the target URL. At each step it fetches a page, extracts all `<a href>` links and form actions from the same domain, and enqueues any newly discovered URLs up to the configured depth limit.
+The spider uses a standard BFS queue (`collections.deque`) seeded with the target URL. At each step it fetches a page, extracts all `<a href>` links and form actions from the same domain, and enqueues newly discovered URLs up to the configured depth limit. Only `text/html` responses are processed for link extraction — non-HTML content types are skipped.
 
 ```python title="BFS queue structure (from spider_website)"
 urls_queue = deque()
-urls_queue.append((target_url, depth=0))
+urls_queue.append((target_url, 0))  # (url, depth)
 
 while urls_queue and len(visited) < max_pages:
     current_url, depth = urls_queue.popleft()
@@ -21,7 +21,7 @@ while urls_queue and len(visited) < max_pages:
     # fetch, parse, enqueue children at depth+1
 ```
 
-A `tqdm` progress bar shows the number of pages visited and URLs discovered when the `tqdm` library is available. Without it, a progress update is printed every 20 pages.
+A `tqdm` progress bar shows pages visited and URLs discovered in real time when the `tqdm` library is installed. Without it, a progress update is printed every 20 pages.
 
 ## Configuration Options
 
@@ -36,7 +36,7 @@ When you select option 7, three parameters are prompted interactively:
 </ParamField>
 
 <ParamField path="use_robots" type="boolean" default="true">
-  When `true`, the crawler loads `robots.txt` at startup and skips any URL that the `*` user-agent is disallowed from fetching. Set to `false` to crawl without restrictions (only do this on systems you control or with explicit permission).
+  When `true`, the crawler loads `robots.txt` at startup and skips any URL that the `*` user-agent is disallowed from fetching. Set to `false` to crawl without restrictions (only on systems you control or with explicit permission).
 </ParamField>
 
 ```text title="Interactive Prompts"
@@ -52,7 +52,7 @@ When you select option 7, three parameters are prompted interactively:
 
 ## Redirect Handling
 
-The spider uses a `requests.Session` with `MAX_REDIRECTS = 10`. For pages that exceed the redirect limit, WSTG-Scan catches `requests.exceptions.TooManyRedirects` and **does not abort** — instead it retries the request with `allow_redirects=False` to capture the raw redirect target. This means redirect chains on the target site do not halt the crawl.
+The spider uses a `requests.Session` with up to `MAX_REDIRECTS = 10` redirects followed automatically. For pages that exceed the redirect limit, WSTG-Scan catches `requests.exceptions.TooManyRedirects` and **does not abort the crawl** — instead it retries the request with `allow_redirects=False` to capture the raw redirect target. This means pathological redirect chains on the target site do not halt the entire spider run.
 
 ```python title="TooManyRedirects handling (from spider_website)"
 try:
@@ -68,23 +68,23 @@ except requests.exceptions.TooManyRedirects:
 
 ## Form Detection and Deduplication
 
-For every HTML page visited, WSTG-Scan uses BeautifulSoup to find all `<form>` elements. For each form, it extracts:
+For every HTML page visited, WSTG-Scan uses BeautifulSoup to find all `<form>` elements. For each form it extracts:
 
 - **Action URL** — resolved to an absolute URL relative to the current page
 - **Method** — `GET` or `POST` (defaults to `GET` if unspecified)
 - **Input names** — all `<input>`, `<textarea>`, and `<select>` names, **excluding** types `submit`, `button`, `image`, `reset`, and `file`
 
-The exclusion of non-data input types means the injection module only tests fields that actually carry user-controlled data, avoiding wasted payloads against submit buttons.
+The exclusion of non-data input types means the injection module only tests fields that carry user-controlled data, avoiding wasted payloads against submit buttons or file upload inputs.
 
 ### Form Deduplication
 
-Many applications render the same navigation bar or login form on every page. Without deduplication, a site with 100 pages and a shared login form in the navbar would produce 100 identical form entries. WSTG-Scan deduplicates forms by a composite key:
+Many applications render the same navigation bar or login form on every page. Without deduplication, a site with 100 pages and a shared login form would produce 100 identical form entries. WSTG-Scan deduplicates forms by a composite key:
 
 ```python title="Form deduplication key (from spider_website)"
 form_key = (
-    form_action_url,          # resolved absolute URL
-    method,                   # "GET" or "POST"
-    tuple(sorted(set(form_inputs)))  # sorted, deduplicated input names
+    form_action_url,                     # resolved absolute URL
+    method,                              # "GET" or "POST"
+    tuple(sorted(set(form_inputs)))      # sorted, deduplicated input names
 )
 if form_key in form_keys_seen:
     continue
@@ -99,7 +99,7 @@ The spider only follows links whose `netloc` matches the target domain. External
 
 ## Output and Results
 
-When the crawl completes, a summary is printed and stored:
+When the crawl completes, a summary is printed:
 
 ```text title="Spider Completion Output"
 [+] Spidering completado. Páginas visitadas: 87, URLs únicas descubiertas: 312
@@ -131,29 +131,19 @@ Results are saved to `SCAN_DATA["spider"]`:
 }
 ```
 
-### Optional URL Export
-
-After spidering completes, the scanner prompts whether to save the full URL list to a file:
-
-```text
-¿Guardar lista de URLs en un archivo? (s/n): s
-Nombre del archivo (default: spider_output.txt): 
-[+] URLs guardadas en spider_output.txt
-```
-
 ## Downstream Module Integration
 
 <CardGroup cols={2}>
   <Card title="Injection Tests (Option 9)" icon="syringe">
-    The injection module consumes `sample_forms` and `sample_params` directly from `SCAN_DATA["spider"]`, testing each form input and GET parameter with SQL injection, XSS, path traversal, command injection, and open redirect payloads.
+    The injection module consumes forms and parameters directly from the spider results, testing each form input and GET parameter with SQL injection, XSS, path traversal, command injection, and open redirect payloads.
   </Card>
   <Card title="Source Code Analysis (Option 8)" icon="code">
-    The source code module reuses `sample_urls` as the seed list for downloading HTML pages and linked JavaScript, JSON, and source map files. Running the spider first expands coverage from a single target URL to hundreds of application pages.
+    The source code module reuses spider URLs as the seed list for downloading HTML pages and linked JavaScript, JSON, and source map files. Running the spider first expands coverage from a single target URL to hundreds of application pages.
   </Card>
 </CardGroup>
 
 <Tip>
-  Always run the Spider (option 7) before the Injection Tests (option 9) and Source Code Analysis (option 8). The spider's output directly feeds both modules — without it, injection tests only have access to the target's root URL parameters and source code analysis only downloads the landing page.
+  Always run the Spider (option 7) before the Injection Tests (option 9) and Source Code Analysis (option 8). Without prior spider data, the source code analysis module will offer to run a quick spider capped at 50 pages and depth 2 automatically.
 </Tip>
 
 <Note>

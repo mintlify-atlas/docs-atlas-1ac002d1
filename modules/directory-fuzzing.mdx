@@ -1,14 +1,14 @@
 ---
-title: "Directory and Virtual Host Fuzzing via ffuf Baseline"
+title: "Directory and VHost Fuzzing with ffuf Baseline Filtering"
 sidebarTitle: "Dir Fuzzing"
-description: "Menu options 5 and 6 use ffuf with Content-Length baseline filtering and auto-calibration to find virtual hosts and hidden directories accurately."
+description: "Options 5 and 6 use ffuf with Content-Length baseline and auto-calibration to find virtual hosts and hidden directories with minimal false positives."
 ---
 
 WSTG-Scan provides two complementary fuzzing capabilities under menu options **5** (VHost fuzzing) and **6** (directory fuzzing). Both modules use [ffuf](https://github.com/ffuf/ffuf) as the primary engine when available, with an internal multithreaded fallback when it is not. Baseline content-length filtering, wordlist pre-processing, and authenticated redirect resolution work together to keep false positive rates low even against wildcard applications.
 
 ## Option 5 — VHost Fuzzing
 
-Virtual host fuzzing discovers additional hostnames served by the same IP address by cycling the `Host` header through a wordlist. This technique uncovers staging environments, internal admin panels, and developer subdomains that do not appear in DNS.
+Virtual host fuzzing discovers additional hostnames served by the same IP address by cycling the `Host` header through a wordlist. This technique uncovers staging environments, internal admin panels, and developer subdomains that do not appear in public DNS.
 
 ### How the Baseline Works
 
@@ -19,14 +19,14 @@ GET / HTTP/1.1
 Host: defnotvalid94721.example.com
 ```
 
-The response `Content-Length` (or actual body length if the header is absent) is stored as `baseline_size`. ffuf is then told to filter out any response that matches this size with `-fs <baseline_size>`, so wildcard catch-all responses are silently discarded.
+The response `Content-Length` header value (or actual body length if the header is absent) is stored as `baseline_size`. ffuf is then told to discard any response matching this size with `-fs <baseline_size>`, so wildcard catch-all responses are silently filtered out.
 
 ### Domain Detection
 
 WSTG-Scan auto-detects whether the target is a fully qualified domain name or a bare IP address:
 
 - **FQDN target** (e.g. `https://example.com`): the base domain is suggested automatically and you can accept or override it.
-- **IP target** (e.g. `https://10.10.11.45`): a base domain is required for `Host: FUZZ.<domain>` to make sense, so you are prompted to provide one (e.g. `planning.htb`).
+- **IP target** (e.g. `https://10.10.11.45`): a base domain is required for `Host: FUZZ.<domain>` to work, so you are prompted to provide one (e.g. `planning.htb`).
 
 ### ffuf VHost Command
 
@@ -42,12 +42,12 @@ ffuf \
 ```
 
 <Note>
-  The default wordlist is SecLists' `Discovery/DNS/namelist.txt`. You can supply a custom path when prompted. For large wordlists (50 000+ entries), the scanner recommends increasing thread count to reduce runtime.
+  The default wordlist is SecLists' `Discovery/DNS/namelist.txt` at `/usr/share/seclists/Discovery/DNS/namelist.txt`. You can supply a custom path when prompted. For large wordlists (50,000+ entries), the scanner recommends increasing the thread count to reduce runtime.
 </Note>
 
 ### VHost Fallback (Internal Multithreaded Method)
 
-If ffuf is not installed, the scanner falls back to an internal Python implementation that performs the same `Host: FUZZ.<domain>` technique using a `ThreadPoolExecutor`. The baseline filtering logic is identical — any response body length that matches the baseline is discarded. This fallback is slower but requires no external tools.
+If ffuf is not installed, the scanner falls back to an internal Python implementation using a `ThreadPoolExecutor`. It performs the same `Host: FUZZ.<domain>` technique and applies identical baseline filtering — any response body length matching the baseline is discarded. This fallback is slower but requires no external tools.
 
 ### Interactive Prompts (VHost)
 
@@ -105,13 +105,13 @@ for line in src:
     dst.write(entry + '\n')
 ```
 
-The number of kept entries is reported before scanning begins. The cleaned temporary file is removed automatically after the scan.
+The number of kept entries is reported before scanning begins. The cleaned temporary file is deleted automatically after the scan.
 
 ### Baseline Filter and Auto-Calibration
 
 WSTG-Scan fetches the target root before launching ffuf to measure its response size. If the root returns HTTP 200, that size is passed to ffuf as `-fs <baseline_size>`, preventing wildcard applications (those that return 200 for any path) from flooding results with false positives.
 
-Auto-calibration (`-ac`) is always enabled, giving ffuf an additional layer of dynamic false-positive filtering.
+Auto-calibration (`-ac`) is always enabled, giving ffuf an additional layer of dynamic false-positive filtering on top of the explicit baseline filter.
 
 ### ffuf Directory Command
 
@@ -127,22 +127,22 @@ ffuf \
 ```
 
 <Note>
-  The default wordlist is SecLists' `Discovery/Web-Content/raft-small-directories.txt`. You can provide a custom wordlist when prompted. The medium-density alternative `directory-list-lowercase-2.3-medium.txt` is also available in the SecLists path constant `SECLISTS_MEDIUM`.
+  The default wordlist is SecLists' `raft-small-directories.txt` at `/usr/share/seclists/Discovery/Web-Content/raft-small-directories.txt`. A higher-coverage alternative, `directory-list-lowercase-2.3-medium.txt`, is also available at the path stored in the `SECLISTS_MEDIUM` constant.
 </Note>
 
 ### Authenticated Redirect Resolution
 
-When the session is authenticated, a 302 redirect from a discovered path may hide a real 200 response on the redirect target. WSTG-Scan resolves these automatically by following the redirect chain and reporting the final status code instead:
+When the session is authenticated, a 302 redirect from a discovered path may hide a real 200 response behind a login page. WSTG-Scan resolves these automatically by following the redirect chain and reporting the final HTTP status code:
 
 ```text
 [302] /dashboard → (resolved) [200] /dashboard   (login redirect resolved)
 ```
 
-A **NOTA** column in the results table shows `login redirect` if the 302 destination was a login page, helping you distinguish between redirects that require authentication and those that are permanent moves.
+A **NOTA** column in the results table shows `login redirect` when the 302 destination was a login page, distinguishing authentication-gated paths from genuine permanent redirects.
 
 ### Internal Fallback
 
-Without ffuf, a multithreaded Python implementation performs the same directory enumeration. It uses the same `COMMON_DIRS` list as a built-in wordlist when no external wordlist is available, covering common targets like `/admin`, `/.git/HEAD`, `/.env`, `/backup.sql`, `/phpinfo.php`, and similar paths.
+Without ffuf, a multithreaded Python implementation performs the same directory enumeration. It uses the `COMMON_DIRS` built-in list when no external wordlist is available, covering common sensitive paths like `/admin`, `/.git/HEAD`, `/.env`, `/backup.sql`, and `/phpinfo.php`.
 
 ### Interactive Prompts (Directory Fuzzing)
 
@@ -157,14 +157,14 @@ Without ffuf, a multithreaded Python implementation performs the same directory 
 ### Example Results Table
 
 ```text title="Directory Fuzzing Results"
-┌──────────┬────────────────────────────────────────┬────────┬────────┬────────┬──────────────────────┐
-│ STATUS   │ PATH                                   │  SIZE  │  WORDS │    DUR │ NOTA                 │
-├──────────┼────────────────────────────────────────┼────────┼────────┼────────┼──────────────────────┤
-│ [200]    │ admin                                  │ 12,834 │  1,203 │  45ms  │                      │
-│ [200]    │ backup                                 │  4,096 │    312 │  38ms  │                      │
-│ [302]    │ dashboard                              │    512 │     48 │  22ms  │ login redirect       │
-│ [200]    │ api                                    │    892 │     78 │  31ms  │                      │
-└──────────┴────────────────────────────────────────┴────────┴────────┴────────┴──────────────────────┘
+┌──────────┬──────────────┬────────┬────────┬────────┬──────────────────────┐
+│ STATUS   │ PATH         │  SIZE  │  WORDS │    DUR │ NOTA                 │
+├──────────┼──────────────┼────────┼────────┼────────┼──────────────────────┤
+│ [200]    │ admin        │ 12,834 │  1,203 │  45ms  │                      │
+│ [200]    │ backup       │  4,096 │    312 │  38ms  │                      │
+│ [302]    │ dashboard    │    512 │     48 │  22ms  │ login redirect       │
+│ [200]    │ api          │    892 │     78 │  31ms  │                      │
+└──────────┴──────────────┴────────┴────────┴────────┴──────────────────────┘
 
   Total: 4 endpoint(s) encontrados
 ```
@@ -174,6 +174,7 @@ Without ffuf, a multithreaded Python implementation performs the same directory 
 Both VHost and directory hits are appended to `FINDINGS` and stored in `SCAN_DATA`:
 
 ```text
+[VHOST] staging.example.com [200]
 [DIR] https://example.com/admin [200]
 [DIR] https://example.com/backup [200]
 [DIR] https://example.com/dashboard [302] (login redirect)
@@ -182,5 +183,5 @@ Both VHost and directory hits are appended to `FINDINGS` and stored in `SCAN_DAT
 VHost results are stored in `SCAN_DATA["vhosts"]`; directory results in `SCAN_DATA["directory_hits"]`. Both appear in dedicated sections of the HTML dashboard, the plain-text report, and the Markdown report.
 
 <Warning>
-  Fuzzing generates a large number of HTTP requests in a short time. Always confirm you have written authorisation before running these modules. Consider using the `--delay` flag to rate-limit requests against production systems.
+  Fuzzing generates a large number of HTTP requests in a short time. Always confirm you have written authorisation before running these modules. Use the `--delay` flag to rate-limit requests against production systems.
 </Warning>

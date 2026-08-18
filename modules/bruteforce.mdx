@@ -61,18 +61,18 @@ Knowing the exact error message that the application returns for bad credentials
 
 <Steps>
   <Step title="Impossible Credentials Probe">
-    Credentials `__wstg_x7z9q__` / `__wstg_x7z9q__` are sent to the primary login form. The response body is stripped of `<script>`, `<style>`, and `<noscript>` tags, then split into lines.
+    Credentials `__wstg_x7z9q__` / `__wstg_x7z9q__` are sent to the primary login form. The response body is stripped of `<script>`, `<style>`, and `<noscript>` tags using BeautifulSoup, then split into lines.
   </Step>
   <Step title="Candidate Extraction">
     Lines containing known failure keywords in Spanish or English (`invalid`, `incorrect`, `wrong`, `failed`, `inválido`, `incorrecto`, `usuario o contraseña`, etc.) are extracted as candidates. Lines shorter than 5 characters or longer than 200 characters are discarded.
   </Step>
   <Step title="User Confirmation">
-    Up to five candidates are displayed and the user is asked to confirm which one (if any) is the correct error message. The confirmed phrase is used as the failure oracle for all subsequent brute-force attempts.
+    Up to ten candidates are displayed and the user is asked to confirm which one (if any) is the correct error message. Choosing `n` activates the strict heuristic mode. The confirmed phrase is used as the failure oracle for all subsequent brute-force attempts.
   </Step>
 </Steps>
 
 <Tip>
-  Confirming the error message greatly reduces false positives. If you skip confirmation, the strict heuristic (≥ 2 positive signals) applies automatically.
+  Confirming the error message greatly reduces false positives. If you skip confirmation or no candidates are found, the strict heuristic (≥ 2 positive signals) applies automatically.
 </Tip>
 
 ---
@@ -84,7 +84,7 @@ Knowing the exact error message that the application returns for bad credentials
 When Hydra is installed and the user opts in, the module constructs an `http-post-form` attack:
 
 ```bash title="Hydra command structure"
-hydra -l <user> -P <wordlist> \
+hydra -L <userlist> -P <wordlist> \
   -t 4 -I -u \
   <target_host> http-post-form \
   "/login:username=^USER^&password=^PASS^:<error_message>"
@@ -93,9 +93,9 @@ hydra -l <user> -P <wordlist> \
 Key flags:
 - **`-t 4`** — four threads per target, balancing speed and reliability
 - **`-I`** — ignore an existing restore file, ensuring a clean run without stale state
-- **`-u`** — loop users before passwords (username deduplication), matching the outer loop order in the module
+- **`-u`** — loop users before passwords (username-first ordering), matching the outer loop order in the module
 
-Basic Auth targets use `hydra`'s `http-get` module with the same `-t 4 -I -u` flags.
+If Hydra finds credentials, any users it missed (race conditions, CSRF-protected endpoints) are retried automatically with the CSRF-aware Python fallback.
 
 ### CSRF-Aware Fallback
 
@@ -109,14 +109,17 @@ This guarantees that every attempt carries a valid CSRF token, which Hydra's sta
 
 ### Strict Heuristic (No Confirmed Error Message)
 
-When no error message was confirmed during the auto-detection step, the module applies a **two-signal rule** to flag a successful login: at least two of the following must be true in the response, compared to the baseline failure response:
+When no error message was confirmed during the auto-detection step, the module applies a **two-signal rule** to flag a successful login. Each response is evaluated against five independent signals:
 
-- HTTP status code differs from the failed-login baseline
-- Response body length differs by more than 10 %
-- A session or authentication cookie is set that was absent in the failure response
-- The response URL after redirects differs from the login page URL
+| Signal | Description |
+|--------|-------------|
+| `has_success_kw` | Body contains success keywords: `logout`, `dashboard`, `welcome`, `profile`, etc. |
+| `status_changed` | HTTP status differs from the failed-login baseline and the final path also differs |
+| `redirect_off_login` | 3xx redirect leads to a URL that is not a login path |
+| `size_outlier` | Response content length falls outside the baseline failure length range |
+| `path_left_login` | Final URL path after redirects is not a login path |
 
-Requiring two independent signals prevents a single response-length fluctuation or a cosmetic redirect from being misreported as a valid credential.
+A login attempt is flagged as successful when **a strong signal is present** (success keywords AND a path/status/redirect change) **or when ≥ 2 of the five signals** are simultaneously true. This prevents a single response-length fluctuation or cosmetic redirect from being misreported as a valid credential.
 
 ---
 
@@ -126,7 +129,7 @@ Requiring two independent signals prevents a single response-length fluctuation 
   <Card title="SecLists Passwords" icon="list">
     **Default path:** `/usr/share/seclists/Passwords/xato-net-10-million-passwords-10000.txt`
 
-    A curated 10 000-entry password list from xato.net, ideal for fast sweeps without triggering account lockout policies.
+    A curated 10,000-entry password list from xato.net, ideal for fast sweeps without triggering account lockout policies.
   </Card>
   <Card title="RockYou" icon="lock">
     **Default path:** `/usr/share/wordlists/rockyou.txt`

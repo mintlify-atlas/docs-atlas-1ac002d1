@@ -1,5 +1,5 @@
 ---
-title: "API Security Testing: OWASP API Top 10 Coverage"
+title: "API Security Testing: Full OWASP API Top 10 Coverage"
 sidebarTitle: "API Testing"
 description: "Automated OWASP API Top 10 testing: endpoint discovery, IDOR, JWT attacks, rate limiting, auth bypass, mass assignment, and GraphQL introspection."
 ---
@@ -74,19 +74,19 @@ JWT detection and attack testing is comprehensive. Tokens are searched in:
 Once a JWT is found, the following attacks are attempted:
 
 <Accordion title="alg:none Bypass">
-  The token header's `alg` field is changed to `"none"` and the signature is stripped. The forged token is sent to the target; if the server responds with the same status as the authenticated session (and not 401/403), the bypass is confirmed.
+  The token header's `alg` field is changed to `"none"` and the signature is stripped. The forged token is sent to the target; if the server responds with the same status as the unauthenticated baseline (and not 401/403), the bypass is confirmed at critical severity.
 </Accordion>
 
 <Accordion title="RS256 → HS256 Key Confusion">
-  When the original token uses RS256 (asymmetric), the module attempts to forge a new token signed with HS256 using the server's public key as the HMAC secret. This exploits libraries that trust the `alg` field from the token header.
+  When the original token uses an RSA algorithm (`RS256`, `RS384`, `RS512`), the module flags the potential RS256→HS256 key-confusion attack for manual verification. This exploits libraries that trust the `alg` field from the token header without validating key type.
 </Accordion>
 
 <Accordion title="kid Path Traversal / SQLi">
-  If the token header contains a `kid` field, the module tests for path traversal (`../../dev/null`) and SQL injection (`' UNION SELECT 'secret'--`) in the `kid` value, which is used by some servers to locate the signing key.
+  If the token header contains a `kid` field, the module checks whether the value contains path traversal characters (`..`, `/`, `\`, `file:`) or SQL injection indicators (`'`, `"`, the word `sql`). A dangerous `kid` value is flagged as high severity.
 </Accordion>
 
 <Accordion title="HMAC Secret Brute Force">
-  For HS256/HS384/HS512 tokens, the HMAC secret is brute-forced against a built-in list of common secrets (`secret`, `password`, `changeme`, `jwt_secret`, `app_secret`, etc.) plus up to 2 000 entries from a wordlist file if available.
+  For HS256/HS384/HS512 tokens, the HMAC secret is brute-forced against a built-in list of common secrets plus up to 2,000 entries from a wordlist file if available.
 
   ```python title="Default secrets tried"
   "secret", "password", "123456", "changeme", "admin", "test",
@@ -95,50 +95,52 @@ Once a JWT is found, the following attacks are attempted:
   ```
 </Accordion>
 
-<Accordion title="Privilege Claim Injection">
-  Common privilege claims (`role: admin`, `is_admin: true`, `permissions: ["admin"]`) are injected into the payload section and the token is re-signed (or unsigned for `alg:none`) to test whether the server accepts elevated claims.
+<Accordion title="Privilege Claim Exposure">
+  The JWT payload is scanned for sensitive privilege fields: `admin`, `role`, `is_admin`, `permission`, `privilege`, `scope`, `group`, `groups`. If any are present, their values are reported as a medium-severity finding.
 </Accordion>
 
 <Accordion title="Expired Token Acceptance">
-  The token's `exp` claim is set to a past timestamp; if the server accepts the expired token, the finding is flagged as a session management weakness.
+  If the token's `exp` claim is set to a past timestamp, the module sends a request with the current session and checks whether the server still returns a non-401/403 response. Acceptance of an expired token is flagged as a session management weakness.
 </Accordion>
 
 ---
 
 ## API4 — Rate Limiting
 
-The rate limiting module sends a rapid burst of identical requests and observes the server's reaction:
+The rate limiting module sends a rapid burst of up to 25 identical POST requests to common login endpoints (`/api/v1/login`, `/api/login`, `/api/auth`, `/login`) and observes the server's reaction:
 
 | Signal | Interpretation |
 |--------|---------------|
 | HTTP `429 Too Many Requests` | Hard rate limit enforced |
-| Progressively increasing response latency | Soft-block / leaky-bucket limiting |
-| CAPTCHA challenge in response body | CAPTCHA-based throttling |
-| Streak of `403 Forbidden` responses | IP ban triggered |
-
-The module reports which mechanism was detected and at what request count the limit kicked in.
+| Progressively increasing response latency (last-5 avg > 2.5× first-5 avg) | Soft-block / leaky-bucket limiting |
+| CAPTCHA challenge keywords in response body | CAPTCHA-based throttling |
+| 5 or more consecutive `403 Forbidden` responses | IP ban triggered |
+| No blocking after 25 requests | No rate limiting — flagged as medium severity |
 
 ---
 
 ## API5 — Authentication Bypass via Headers
 
-The auth bypass module tests whether restricted endpoints can be accessed by spoofing the originating path or source IP using non-standard forwarding headers:
+The auth bypass module tests restricted endpoints (those returning 401 or 403) for access using header-based bypass techniques. An unauthenticated session is used for all bypass attempts to avoid contaminating the authenticated session state.
 
-```
-X-Original-URL: /admin
-X-Rewrite-URL: /admin
-X-Forwarded-For: 127.0.0.1
+```python title="Bypass headers tested"
+{"X-Original-URL": "<restricted_path>"}
+{"X-Rewrite-URL": "<restricted_path>"}
+{"X-Custom-IP-Authorization": "127.0.0.1"}
+{"X-Forwarded-For": "127.0.0.1"}
+{"X-Remote-IP": "127.0.0.1"}
+{"X-Client-IP": "127.0.0.1"}
 ```
 
-A **login baseline** is established first: if the unmodified endpoint returns a login redirect, the module excludes it from positive findings to avoid false positives on public authentication walls.
+A bypass is confirmed only when the response returns HTTP 200 with real content (more than 50 bytes) and does not contain a login form — preventing false positives from applications that return a login page with a 200 status code.
 
 ---
 
 ## API6 — Mass Assignment
 
-Every discovered `POST`, `PUT`, and `PATCH` endpoint is tested for mass assignment by injecting additional JSON fields alongside the normal request body:
+Every discovered `POST`, `PUT`, and `PATCH` endpoint whose path matches user/account/profile/register/update/me/signup is tested for mass assignment by injecting additional JSON fields alongside the normal request body:
 
-```python title="MASS_ASSIGNMENT_FIELDS"
+```python title="MASS_ASSIGNMENT_FIELDS (first 6 tested per endpoint)"
 {"is_admin": True}
 {"role": "admin"}
 {"admin": True}
@@ -153,7 +155,7 @@ Every discovered `POST`, `PUT`, and `PATCH` endpoint is tested for mass assignme
 {"permissions": ["admin", "superuser"]}
 ```
 
-**Persistence verification:** after each injection, the module performs a re-GET of the same object URL. If the injected field value appears in the subsequent GET response, the mass assignment is confirmed as persistent — not just a reflected echo.
+**Persistence verification:** after each injection, the module performs a re-GET of the same endpoint URL. If the injected field value appears in the GET response JSON, the mass assignment is confirmed as persistent — not just a reflected echo. If the field is reflected in the POST/PUT/PATCH response only (without persistence), a medium-severity "possible" finding is raised.
 
 ---
 
@@ -193,6 +195,12 @@ The verbose error module sends intentionally malformed requests (truncated bodie
     A finding is raised for wildcard `*` combined with `Access-Control-Allow-Credentials: true` (critical), for reflected origins with credentials (high), and for reflected origins without credentials (medium).
   </Tab>
 </Tabs>
+
+---
+
+## API9 — Swagger / OpenAPI Exposure
+
+When a Swagger UI, OpenAPI document, or API documentation endpoint is reachable without authentication, it is flagged as an information disclosure finding. The discovered paths are then used to extend the endpoint map for all subsequent test modules.
 
 ---
 

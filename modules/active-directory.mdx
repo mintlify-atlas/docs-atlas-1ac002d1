@@ -1,5 +1,5 @@
 ---
-title: "Active Directory Pentesting: Kerberos, LDAP, SMB"
+title: "Active Directory Pentesting: Kerberos, LDAP, and SMB"
 sidebarTitle: "Active Directory"
 description: "Full AD pentest module: user enumeration with kerbrute, LDAP queries, SMB with NetExec, AS-REP roasting and Kerberoasting via impacket."
 ---
@@ -11,7 +11,7 @@ Menu option 14 orchestrates the standard Active Directory attack toolkit availab
 </Warning>
 
 <Note>
-  The Active Directory module is skipped in `--batch` mode because it requires interactive prompts (Domain Controller IP, domain name, base DN, and optional credentials). All other modules in a full pentest run normally in batch mode.
+  The Active Directory module is skipped when running in `--batch` mode (or when option 15 full pentest runs non-interactively via `-L targets.txt --batch`), because it requires interactive prompts for the Domain Controller IP, domain name, base DN, and optional credentials. All other modules run normally in batch mode.
 </Note>
 
 ---

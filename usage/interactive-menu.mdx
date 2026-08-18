@@ -4,7 +4,7 @@ sidebarTitle: "Menu"
 description: "Complete guide to every WSTG-Scan menu option — what each module does, when to use it, prerequisites, and how options 16 and 17 appear."
 ---
 
-When WSTG-Scan starts with a single target, it presents a numbered interactive menu that lets you run any scan module independently, in any order, accumulating results into a shared session. Every option you choose re-uses the same HTTP session (including any authentication you have configured), so findings from earlier modules are automatically available to later ones — for example, the URLs discovered by the spider (option 7) feed directly into the source-code analyser (option 8) and injection tests (option 9).
+When WSTG-Scan launches in interactive mode — whether with a single target or multiple targets — it presents a numbered menu that lets you run any scan module independently, in any order, accumulating results into a shared session. Every option you choose re-uses the same HTTP session (including any authentication you have configured), so findings from earlier modules are automatically available to later ones — for example, the URLs discovered by the spider (option 7) feed directly into the source-code analyser (option 8) and injection tests (option 9). In multi-target mode, the selected option is executed sequentially across all loaded targets, each maintaining its own independent state.
 
 ## The Menu
 

@@ -1,10 +1,10 @@
 ---
-title: "Client-Side Source Code Analysis: Secrets and Keys"
+title: "Client-Side Source Code Analysis for Secrets and Keys"
 sidebarTitle: "Source Code Analysis"
-description: "Menu option 8 downloads HTML, JS, JSON, and source maps then applies 15 severity-weighted patterns to detect credentials, API keys, and sensitive data."
+description: "Menu option 8 streams HTML, JS, JSON, and source maps (2 MB cap) then applies 15 severity-weighted patterns to detect credentials, API keys, and secrets."
 ---
 
-The Source Code Analysis module (menu option **8**) scans the client-side source code of the target application for secrets, credentials, and sensitive data that should never be publicly accessible. It downloads every reachable HTML page and linked asset — JavaScript bundles, JSON configs, source maps, CSS, YAML, XML, and `.env` files — then applies 15 regex pattern catalogs weighted by severity. Critical and high findings are automatically promoted to the global `FINDINGS` list with a `[CODE:SEV]` prefix so they appear in every report format.
+The Source Code Analysis module (menu option **8**) scans client-side source code of the target application for secrets, credentials, and sensitive data that should never be publicly accessible. It downloads every reachable HTML page and linked asset — JavaScript bundles, JSON configs, source maps, CSS, YAML, XML, and `.env` files — then applies 15 regex pattern catalogues weighted by severity. Critical and high findings are automatically promoted to the global `FINDINGS` list with a `[CODE:SEV]` prefix so they appear in every report format.
 
 ## URL Sources
 
@@ -12,7 +12,7 @@ The module attempts to reuse previously discovered URLs in priority order:
 
 <Steps>
   <Step title="Reuse Spider URLs">
-    If the Spidering module (option 7) has already run in the current session, `SCAN_DATA["spider"]["sample_urls"]` is used as the seed list. This can provide hundreds of application pages to analyse without any additional HTTP requests.
+    If the Spidering module (option 7) has already run in the current session, its discovered URLs are used as the seed list. This can provide hundreds of application pages to analyse without any additional HTTP requests.
 
     ```text
     [INFO] Usando 312 URLs del último spider.
@@ -26,13 +26,13 @@ The module attempts to reuse previously discovered URLs in priority order:
     ```
   </Step>
   <Step title="Analyse Target Only">
-    If the quick spider is declined, only the target URL is analysed. This is fast but misses any secrets hidden in secondary pages or JavaScript bundles linked from deeper pages.
+    If the quick spider is declined, only the target URL is analysed. This is fast but misses secrets hidden in secondary pages or JavaScript bundles linked from deeper pages.
   </Step>
 </Steps>
 
 ## File Download Logic
 
-For each URL, `_download_text_capped` fetches the resource using streaming (`stream=True`) to avoid loading large files into memory all at once:
+For each URL, `_download_text_capped` fetches the resource using `stream=True` to avoid loading large files into memory all at once:
 
 - **2 MB cap per file** — any file whose `Content-Length` header exceeds 2 MB is skipped entirely. Files without a declared size are streamed and truncated at the 2 MB boundary.
 - Assets are collected from `<script src>`, `<link href>`, and inline `sourceMappingURL` references found in HTML pages.
@@ -51,9 +51,9 @@ For each URL, `_download_text_capped` fetches the resource using streaming (`str
 | `.env` | Environment variable files |
 | `text/*`, `application/json`, `application/javascript` | Any text-based Content-Type |
 
-## Pattern Catalog (15 Patterns)
+## Pattern Catalogue (15 Patterns)
 
-Patterns are applied in order of descending severity. Each match captures a ±30 character context snippet around the finding for the report.
+Patterns are applied in order of descending severity. Each match captures a ±30 character context window around the finding (then capped at 140 characters total) for the report snippet.
 
 ### Critical
 
@@ -68,7 +68,7 @@ Patterns are applied in order of descending severity. Each match captures a ±30
 </Accordion>
 
 <Accordion title="Database Connection Strings with Embedded Credentials">
-  Matches connection URIs for MongoDB, MySQL, PostgreSQL, Redis, AMQP, MSSQL, and JDBC formats where a username:password pair is embedded in the URL:
+  Matches connection URIs for MongoDB, MySQL, PostgreSQL, Redis, AMQP, MSSQL, and JDBC formats where a `username:password@host` pair is embedded in the URL:
 
   ```
   \b(mongodb(\+srv)?|mysql|postgres(ql)?|redis|amqps?|mssql|jdbc:[a-z]+)://[^\s"'<>]*:[^\s"'<>@]+@[^\s"'<>]+
@@ -132,7 +132,7 @@ Patterns are applied in order of descending severity. Each match captures a ±30
 </Accordion>
 
 <Accordion title="Hardcoded Credentials (Generic)">
-  Captures the value from common credential variable names in any language. Matches assignment syntax in JavaScript, Python, PHP, JSON, YAML, and similar formats:
+  Captures the value from common credential variable names. Matches assignment syntax in JavaScript, Python, PHP, JSON, YAML, and similar formats:
 
   ```
   (?i)(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?key|
@@ -145,12 +145,14 @@ Patterns are applied in order of descending severity. Each match captures a ±30
 ### Medium
 
 <Accordion title="Sensitive HTML Comments">
-  HTML comments containing security-relevant keywords: `password`, `api_key`, `private_key`, `bearer`, `backdoor`, `deprecated`, `do not commit`, `TODO`, `FIXME`, `XXX`, `HACK`, `backup file/path/server/db`, `internal use/api/server/tool`, `debug enabled/mode/key/token`:
+  HTML comments containing security-relevant keywords: `password`, `api_key`, `private_key`, `bearer`, `backdoor`, `deprecated`, `do not commit`, `TODO`, `FIXME`, `XXX`, `HACK`, `backup file/path/server/db`, `internal use/api/server/tool`, and `debug enabled/mode/key/token`.
 
   ```html
   <!-- TODO: remove hardcoded password before deploy -->
   <!-- FIXME: admin bypass still active on staging -->
   ```
+
+  Pure UI/layout comments (footer, navbar, logo, carousel, etc.) that contain no credential keywords are filtered out automatically.
 </Accordion>
 
 <Accordion title="Basic Auth in URLs">
@@ -162,7 +164,7 @@ Patterns are applied in order of descending severity. Each match captures a ±30
 </Accordion>
 
 <Accordion title="Exposed Source Maps">
-  `sourceMappingURL` comments in JavaScript that reference an external `.map` file — these can expose the original unminified source code:
+  `sourceMappingURL` comments in JavaScript that reference an external `.map` file — these can expose the full original unminified source code:
 
   ```
   //# sourceMappingURL=app.bundle.js.map
@@ -170,7 +172,7 @@ Patterns are applied in order of descending severity. Each match captures a ±30
 </Accordion>
 
 <Accordion title="Private IP Addresses (Hardcoded)">
-  RFC 1918 private address ranges:
+  RFC 1918 private address ranges hardcoded in client-side code:
   - `10.0.0.0/8`
   - `192.168.0.0/16`
   - `172.16.0.0/12`
@@ -200,11 +202,11 @@ All findings across all downloaded pages and assets are globally deduplicated by
 (type, value[:80].lower(), url)
 ```
 
-This prevents the same hardcoded password from being reported fifty times if it appears in a minified bundle that is referenced from every page on the site.
+This prevents the same hardcoded password from being reported dozens of times if it appears in a minified bundle referenced from every page on the site.
 
 ## Findings Promotion to FINDINGS
 
-Only **critical** and **high** severity findings are promoted to the global `FINDINGS` list:
+Only **critical** and **high** severity findings are promoted to the global `FINDINGS` list with a `[CODE:SEV]` prefix:
 
 ```text
 [CODE:CRITICAL] Clave privada PEM en https://example.com/js/app.bundle.js — valor: -----BEGIN RSA PRIVATE KEY-----
@@ -269,5 +271,5 @@ Medium, low, and informational findings appear in the detailed per-severity tabl
 </Warning>
 
 <Tip>
-  Run the Spider module (option 7) before Source Code Analysis. The spider's `sample_urls` list is used directly as the download seed list — a 300-URL spider result means 300 pages plus all their linked assets are scanned for secrets, versus just the single landing page without it.
+  Run the Spider module (option 7) before Source Code Analysis. The spider's discovered URLs are used directly as the download seed list — a 300-URL spider result means 300 pages plus all their linked assets are scanned for secrets, versus just the single landing page without it.
 </Tip>

@@ -1,13 +1,13 @@
 ---
-title: "Injection Testing: SQLi, XSS, LFI, RCE, Redirect"
+title: "Web Injection Testing: SQLi, XSS, LFI, RCE, Redirect"
 sidebarTitle: "Injection Tests"
 description: "Run all injection tests against forms discovered by the spider: SQLi, XSS, path traversal, command injection, and open redirect detection."
 ---
 
-Menu option 9 runs the full suite of classic web injection tests against every form and GET parameter discovered during spidering. Rather than blindly firing payloads at the root URL, WSTG-Scan first crawls the target (up to 250 pages, depth 3) to collect real form `action` endpoints, field names, and URL query parameters — then drives each payload through those concrete injection points. This approach maximises coverage while keeping request volume proportional to the application's actual surface.
+Menu option 9 runs the full suite of classic web injection tests against every form and GET parameter discovered during spidering. Rather than blindly firing payloads at the root URL, WSTG-Scan first crawls the target to collect real form `action` endpoints, field names, and URL query parameters — then drives each payload through those concrete injection points. This approach maximises coverage while keeping request volume proportional to the application's actual surface.
 
 <Info>
-  Spidering must have run (option 7) or will be triggered automatically before injection tests begin. Form results are deduplicated by `(action, method, inputs)` so the login form appearing in every navbar header is only tested once.
+  Spidering must have run (option 7) or will be triggered automatically before injection tests begin. Form results are deduplicated by `(action, method, inputs)` so the login form appearing in every navbar header is only tested once. Spider results stored in `SCAN_DATA["spider"]` are reused directly without re-crawling.
 </Info>
 
 ## How Injection Points Are Collected
@@ -43,7 +43,7 @@ WSTG-Scan tests for three distinct SQLi classes using the payloads defined in `S
     ```
   </Tab>
   <Tab title="Time-Based Blind">
-    Payloads that trigger deliberate delays (MySQL `SLEEP`, nested subqueries). The scanner measures elapsed time per request; a response taking longer than `DEFAULT_TIMEOUT + 2` seconds flags the parameter as potentially vulnerable.
+    Payloads that trigger deliberate delays (MySQL `SLEEP`, nested subqueries). The scanner measures elapsed time per request; a response taking longer than 4 seconds flags the parameter as potentially vulnerable.
 
     ```python title="Time-based blind payloads"
     "' OR SLEEP(5)-- "
@@ -117,7 +117,7 @@ The set spans both Linux (`; ls`, `$(whoami)`, backtick subshell) and Windows (`
 
 ## Open Redirect
 
-Open redirect detection uses `allow_redirects=False` so the scanner can inspect the raw `Location` header before the client follows it. A finding is raised when the HTTP response is a `3xx` redirect and the `Location` value contains `evil.com` or a protocol-relative `//` prefix.
+Open redirect detection uses `allow_redirects=False` so the scanner can inspect the raw `Location` header before the client follows it. A finding is raised when the HTTP response is a `3xx` redirect and the `Location` value contains the injected external host.
 
 ```python title="Open redirect payloads (OPEN_REDIRECT)"
 "https://evil.com"
